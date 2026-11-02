@@ -42,5 +42,21 @@ public final class RouterOsClient implements Closeable {
   private static String md5Hex(byte[]... parts)throws Exception{MessageDigest d=MessageDigest.getInstance("MD5");for(byte[]p:parts)d.update(p);StringBuilder s=new StringBuilder();for(byte b:d.digest())s.append(String.format("%02x",b));return s.toString();}
   public synchronized void run(String path,String... args)throws Exception{String t="*"+(tag++);List<String>w=new ArrayList<>();w.add(path);w.addAll(Arrays.asList(args));w.add(".tag="+t);send(w.toArray(String[]::new));while(true){List<String> a=sentence();if(a.isEmpty())continue;String type=a.get(0);if("!done".equals(type))return;if("!trap".equals(type)||"!fatal".equals(type))throw new IOException("RouterOS: "+a);}}
   public synchronized List<Map<String,String>> print(String path,String... args)throws Exception{String t="*"+(tag++);List<String>w=new ArrayList<>();w.add(path);w.addAll(Arrays.asList(args));w.add(".tag="+t);send(w.toArray(String[]::new));List<Map<String,String>> rows=new ArrayList<>();while(true){List<String> s=sentence();if(s.isEmpty())continue;String type=s.get(0);if("!done".equals(type))break;if("!trap".equals(type)||"!fatal".equals(type))throw new IOException("RouterOS: "+s);if("!re".equals(type)){Map<String,String>m=new LinkedHashMap<>();for(int i=1;i<s.size();i++){String x=s.get(i);if(x.startsWith("=")){int k=x.indexOf('=',1);if(k>0)m.put(x.substring(1,k),x.substring(k+1));}}rows.add(m);}}return rows;}
+  public synchronized long count(String path)throws Exception{
+    String t="*"+(tag++);
+    send(path,"=count-only=",".tag="+t);
+    while(true){
+      List<String> words=sentence();
+      if(words.isEmpty())continue;
+      String type=words.get(0);
+      if("!trap".equals(type)||"!fatal".equals(type))throw new IOException("RouterOS count query failed: "+words);
+      if("!done".equals(type)){
+        for(String word:words){
+          if(word.startsWith("=ret="))return Long.parseLong(word.substring(5));
+        }
+        throw new IOException("RouterOS count result missing");
+      }
+    }
+  }
   public void close(){try{socket.close();}catch(Exception ignored){}}
 }
