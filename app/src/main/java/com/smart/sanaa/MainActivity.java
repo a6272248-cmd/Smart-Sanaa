@@ -133,7 +133,36 @@ public class MainActivity extends Activity {
       }catch(Exception e){runOnUiThread(()->toast("تعذر فحص المنتهية: "+e.getMessage()));}
     });
   }
-  void showMaintenance(){base("صيانة قاعدة البيانات");body.addView(text("أدوات User Manager الأصلية",22,NAVY));card("RouterOS",version);card("التخزين الحر على الراوتر",resource.getOrDefault("free-hdd-space","غير متاح"));body.addView(text("لا تُشغّل إعادة بناء قاعدة User Manager دون نسخة UMB صالحة واختبار الأوامر حسب إصدار الراوتر.",14,MUTED));Button rebuild=button("إعادة بناء قاعدة البيانات (غير مفعلة)",MUTED);rebuild.setOnClickListener(v->toast("لن تُنفّذ صيانة على راوتر حقيقي قبل التحقق من توافق إصدار RouterOS."));body.addView(rebuild);Button exp=button("فتح الكروت المنتهية",TEAL);exp.setOnClickListener(v->showExpired());body.addView(exp);}
+  void showMaintenance(){
+    base("صيانة User Manager");
+    body.addView(text("حالة قاعدة البيانات",21,NAVY));
+    card("RouterOS",version);
+    card("User Manager",backend);
+    Button read=button("↻ قراءة معلومات القاعدة",TEAL);
+    read.setOnClickListener(v->readDatabase());body.addView(read);space();
+    Button expired=button("عرض الكروت المنتهية",Color.rgb(165,61,80));
+    expired.setOnClickListener(v->showExpired());body.addView(expired);space();
+    body.addView(text("إعادة بناء القاعدة لا تُنفذ من التطبيق قبل التحقق من نسخة احتياطية صالحة وصلاحيات الأمر.",14,MUTED));
+  }
+  void readDatabase(){
+    if(client==null){toast("اتصل بالراوتر أولاً");return;}
+    if(!backend.startsWith("User Manager ")){toast("User Manager غير متاح");return;}
+    io.execute(()->{
+      try{
+        String path=backend.equals("User Manager 6")?"/tool/user-manager/database/print":"/user-manager/database/print";
+        List<Map<String,String>> info=client.print(path);
+        if(info.isEmpty())throw new IOException("لم تُرجع القاعدة بيانات");
+        Map<String,String> db=info.get(0);
+        runOnUiThread(()->{
+          showMaintenance();
+          for(Map.Entry<String,String> field:db.entrySet()){
+            if(field.getKey().equals(".id"))continue;
+            card(field.getKey(),field.getValue());
+          }
+        });
+      }catch(Exception e){runOnUiThread(()->toast("تعذر قراءة القاعدة: "+e.getMessage()));}
+    });
+  }
   void showSettings(){
     base("اتصال MikroTik");
     body.addView(text("اتصال API مباشر بالشبكة المحلية",22,NAVY));
