@@ -41,6 +41,20 @@ public final class RouterOsClient implements Closeable {
   private static byte[] hex(String x){byte[]b=new byte[x.length()/2];for(int i=0;i<b.length;i++)b[i]=(byte)Integer.parseInt(x.substring(i*2,i*2+2),16);return b;}
   private static String md5Hex(byte[]... parts)throws Exception{MessageDigest d=MessageDigest.getInstance("MD5");for(byte[]p:parts)d.update(p);StringBuilder s=new StringBuilder();for(byte b:d.digest())s.append(String.format("%02x",b));return s.toString();}
   public synchronized void run(String path,String... args)throws Exception{String t="*"+(tag++);List<String>w=new ArrayList<>();w.add(path);w.addAll(Arrays.asList(args));w.add(".tag="+t);send(w.toArray(String[]::new));while(true){List<String> a=sentence();if(a.isEmpty())continue;String type=a.get(0);if("!done".equals(type))return;if("!trap".equals(type)||"!fatal".equals(type))throw new IOException("RouterOS: "+a);}}
+  /** Returns a RouterOS internal id when a successful add reply contains =ret=. */
+  public synchronized String runReturning(String path,String... args)throws Exception{
+    String t="*"+(tag++);
+    List<String> words=new ArrayList<>();words.add(path);words.addAll(Arrays.asList(args));words.add(".tag="+t);
+    send(words.toArray(new String[0]));
+    String ret="";
+    while(true){
+      List<String> reply=sentence();if(reply.isEmpty())continue;
+      String type=reply.get(0);
+      if("!trap".equals(type)||"!fatal".equals(type))throw new IOException("RouterOS: "+reply);
+      for(String word:reply)if(word.startsWith("=ret="))ret=word.substring(5);
+      if("!done".equals(type))return ret;
+    }
+  }
   public synchronized List<Map<String,String>> print(String path,String... args)throws Exception{String t="*"+(tag++);List<String>w=new ArrayList<>();w.add(path);w.addAll(Arrays.asList(args));w.add(".tag="+t);send(w.toArray(String[]::new));List<Map<String,String>> rows=new ArrayList<>();while(true){List<String> s=sentence();if(s.isEmpty())continue;String type=s.get(0);if("!done".equals(type))break;if("!trap".equals(type)||"!fatal".equals(type))throw new IOException("RouterOS: "+s);if("!re".equals(type)){Map<String,String>m=new LinkedHashMap<>();for(int i=1;i<s.size();i++){String x=s.get(i);if(x.startsWith("=")){int k=x.indexOf('=',1);if(k>0)m.put(x.substring(1,k),x.substring(k+1));}}rows.add(m);}}return rows;}
   public synchronized long count(String path)throws Exception{
     String t="*"+(tag++);
