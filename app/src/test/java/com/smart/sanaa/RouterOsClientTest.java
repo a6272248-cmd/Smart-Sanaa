@@ -70,4 +70,26 @@ public class RouterOsClientTest {
             thread.join(4000);
         }
     }
+    @Test public void returnsLegacyUserManagerId()throws Exception{
+        try(ServerSocket server=new ServerSocket(0)){
+            server.setSoTimeout(4000);
+            Thread thread=new Thread(()->{
+                try(Socket peer=server.accept()){
+                    peer.setSoTimeout(4000);
+                    request(peer.getInputStream());
+                    reply(peer.getOutputStream(),"!done");
+                    List<String> add=request(peer.getInputStream());
+                    assertEquals("/tool/user-manager/user/add",add.get(0));
+                    reply(peer.getOutputStream(),"!done","=ret=*123ABC");
+                }catch(Exception e){throw new RuntimeException(e);}
+            });
+            thread.start();
+            try(RouterOsClient api=new RouterOsClient("127.0.0.1",server.getLocalPort(),false,"admin","test")){
+                assertEquals("*123ABC",api.runReturning("/tool/user-manager/user/add","=username=10001"));
+            }
+            thread.join(4000);
+            assertFalse(thread.isAlive());
+        }
+    }
+
 }
