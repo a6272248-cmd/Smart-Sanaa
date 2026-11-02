@@ -14,6 +14,12 @@ import java.util.List;
 public final class VoucherPdf {
     private VoucherPdf() {}
     public static void write(ContentResolver resolver, Uri uri, List<String> users, String profile) throws IOException {
+        try(OutputStream stream=resolver.openOutputStream(uri)){
+            if(stream==null)throw new IOException("Cannot open selected document");
+            write(stream,users,profile);
+        }
+    }
+    public static void write(OutputStream destination, List<String> users, String profile) throws IOException {
         if (users == null || users.isEmpty()) throw new IOException("No confirmed vouchers to export");
         PdfDocument pdf = new PdfDocument();
         Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -36,10 +42,7 @@ public final class VoucherPdf {
                 row = (row + 1) % 24;
             }
             if (page != null) pdf.finishPage(page);
-            try (OutputStream stream = resolver.openOutputStream(uri)) {
-                if (stream == null) throw new IOException("Could not open output file");
-                pdf.writeTo(stream);
-            }
+            pdf.writeTo(destination);
         } finally {
             pdf.close();
         }
