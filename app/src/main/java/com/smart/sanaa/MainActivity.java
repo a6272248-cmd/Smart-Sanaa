@@ -9,11 +9,44 @@ public class MainActivity extends Activity {
   TextView text(String s,float z,int c){TextView t=new TextView(this);t.setText(s);t.setTextSize(z);t.setTextColor(c);t.setPadding(18,12,18,12);t.setGravity(Gravity.RIGHT|Gravity.CENTER_VERTICAL);return t;}
   GradientDrawable shape(int c,float r){GradientDrawable g=new GradientDrawable();g.setColor(c);g.setCornerRadius(r);return g;}
   Button button(String s,int c){Button b=new Button(this);b.setText(s);b.setTextSize(15);b.setTextColor(Color.WHITE);b.setAllCaps(false);b.setBackground(shape(c,28));return b;}
-  void base(String title){LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(SURFACE);root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);LinearLayout head=new LinearLayout(this);head.setPadding(16,18,16,8);TextView h=text(title,24,NAVY);h.setTypeface(null,1);head.addView(h,new LinearLayout.LayoutParams(0,66,1));Button menu=button("☰",TEAL);head.addView(menu,new LinearLayout.LayoutParams(62,58));root.addView(head);ScrollView scroll=new ScrollView(this);body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);body.setPadding(18,8,18,130);scroll.addView(body);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));root.addView(nav());setContentView(root);}
+  void base(String title){LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(prefs.getBoolean("dark",false)?Color.rgb(12,25,41):SURFACE);root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);LinearLayout head=new LinearLayout(this);head.setPadding(16,18,16,8);TextView h=text(title,24,NAVY);h.setTypeface(null,1);head.addView(h,new LinearLayout.LayoutParams(0,66,1));Button menu=button("☰",TEAL);head.addView(menu,new LinearLayout.LayoutParams(62,58));menu.setOnClickListener(v->{PopupMenu pm=new PopupMenu(this,menu);String[] items={"الرئيسية","إضافة كروت","الكروت","الكروت المنتهية","الجلسات","التقارير","صيانة قاعدة البيانات","الإعدادات","الوضع الليلي / النهاري"};for(String item:items)pm.getMenu().add(item);pm.setOnMenuItemClickListener(item->{String choice=item.getTitle().toString();switch(choice){case "الرئيسية":showDashboard();break;case "إضافة كروت":showAdd();break;case "الكروت":showCards();break;case "الكروت المنتهية":showExpired();break;case "الجلسات":showSessions();break;case "التقارير":showReports();break;case "صيانة قاعدة البيانات":showMaintenance();break;case "الإعدادات":showSettings();break;default:prefs.edit().putBoolean("dark",!prefs.getBoolean("dark",false)).apply();showDashboard();}return true;});pm.show();});root.addView(head);ScrollView scroll=new ScrollView(this);body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);body.setPadding(18,8,18,130);scroll.addView(body);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));root.addView(nav());setContentView(root);}
   LinearLayout nav(){LinearLayout n=new LinearLayout(this);n.setPadding(5,6,5,6);String[] a={"الرئيسية","الكروت","الجلسات","التقارير","الصيانة","الإعدادات"};for(String x:a){Button b=button(x,Color.WHITE);b.setTextColor(NAVY);b.setTextSize(11);b.setOnClickListener(v->{switch(x){case "الرئيسية":showDashboard();break;case "الكروت":showCards();break;case "الجلسات":showSessions();break;case "التقارير":showReports();break;case "الصيانة":showMaintenance();break;default:showSettings();}});n.addView(b,new LinearLayout.LayoutParams(0,60,1));}return n;}
   void space(){Space s=new Space(this);body.addView(s,new LinearLayout.LayoutParams(1,12));}
-  void card(String h,String v){LinearLayout c=new LinearLayout(this);c.setOrientation(LinearLayout.VERTICAL);c.setPadding(10,8,10,10);c.setBackground(shape(Color.WHITE,24));c.addView(text(h,14,TEAL));TextView v1=text(v,23,NAVY);v1.setTypeface(null,1);c.addView(v1);body.addView(c);space();}
-  void showDashboard(){base("الرئيسية");body.addView(text("Smart Manager",28,NAVY));body.addView(text("إدارة MikroTik وUser Manager من هاتفك",16,MUTED));Button connect=button(client==null?"اتصال بالراوتر":"تحديث بيانات الراوتر",TEAL);connect.setOnClickListener(v->{if(client==null)showSettings();else loadDashboard();});body.addView(connect);space();card("RouterOS",version);card("CPU",resource.getOrDefault("cpu-load","—")+"%");card("مدة التشغيل",resource.getOrDefault("uptime","—"));card("Hotspot النشط",hotspotActive<0?"—":String.valueOf(hotspotActive));card("PPPoE النشط",pppActive<0?"—":String.valueOf(pppActive));card("إجمالي User Manager",umCount<0?"غير متاح":String.valueOf(umCount));card("نوع User Manager",backend);}
+  void card(String h,String v){LinearLayout c=new LinearLayout(this);c.setOrientation(LinearLayout.VERTICAL);c.setPadding(10,8,10,10);c.setBackground(shape(prefs.getBoolean("dark",false)?Color.rgb(26,49,74):Color.WHITE,24));c.addView(text(h,14,TEAL));TextView v1=text(v,23,prefs.getBoolean("dark",false)?Color.WHITE:NAVY);v1.setTypeface(null,1);c.addView(v1);body.addView(c);space();}
+  void showDashboard(){
+    base("الرئيسية");
+    LinearLayout hero=new LinearLayout(this);
+    hero.setOrientation(LinearLayout.VERTICAL);
+    hero.setPadding(18,18,18,18);
+    hero.setBackground(shape(Color.rgb(5,31,61),30));
+    TextView branding=text("سمارت صنعاء",29,Color.WHITE);
+    branding.setTypeface(null,1);hero.addView(branding);
+    hero.addView(text("MikroTik Network Management",14,Color.rgb(137,210,233)));
+    hero.addView(text("إدارة الشبكات المحلية • RouterOS 6 / 7",14,Color.WHITE));
+    body.addView(hero);space();
+    if(client==null){
+      Button connect=button("الاتصال بالراوتر",TEAL);
+      connect.setOnClickListener(v->showSettings());body.addView(connect);space();
+    }else{
+      Button refresh=button("↻ تحديث البيانات",TEAL);
+      refresh.setOnClickListener(v->loadDashboard());body.addView(refresh);space();
+    }
+    card("RouterOS",version);
+    card("استخدام CPU",resource.getOrDefault("cpu-load","—")+"%");
+    card("مدة التشغيل",resource.getOrDefault("uptime","—"));
+    body.addView(text("الإحصاءات",22,prefs.getBoolean("dark",false)?Color.WHITE:NAVY));
+    card("PPPoE النشط",pppActive<0?"—":String.valueOf(pppActive));
+    card("Hotspot النشط",hotspotActive<0?"—":String.valueOf(hotspotActive));
+    card("إجمالي كروت User Manager",umCount<0?"غير متاح":String.valueOf(umCount));
+    body.addView(text("الوصول السريع",22,prefs.getBoolean("dark",false)?Color.WHITE:NAVY));
+    String[] routes={"إضافة الكروت","عمليات الكروت","الجلسات","الكروت المنتهية","صيانة User Manager"};
+    for(String r:routes){
+      Button link=button("›   "+r,Color.rgb(18,89,132));
+      link.setOnClickListener(v->{switch(r){case "إضافة الكروت":showAdd();break;case "عمليات الكروت":showCards();break;case "الجلسات":showSessions();break;case "الكروت المنتهية":showExpired();break;default:showMaintenance();}});
+      body.addView(link);space();
+    }
+    card("معلومات الراوتر",resource.getOrDefault("board-name","—")+"\n"+resource.getOrDefault("architecture-name","—")+"\nالذاكرة الحرة: "+resource.getOrDefault("free-memory","—")+"\nالتخزين الحر: "+resource.getOrDefault("free-hdd-space","—"));
+  }
   void loadDashboard(){
     if(client==null){showSettings();return;}
     if(refreshing)return;
@@ -36,7 +69,7 @@ public class MainActivity extends Activity {
       }catch(Exception e){runOnUiThread(()->{refreshing=false;toast("تعذر قراءة الراوتر: "+e.getMessage());});}
     });
   }
-  int count(String path){try{return client.print(path).size();}catch(Exception e){return -1;}}
+  int count(String path){try{long result=client.count(path);return (int)Math.min(Integer.MAX_VALUE,result);}catch(Exception e){return -1;}}
   void showCards(){base("الكروت");body.addView(text("إدارة الكروت والمستخدمين",22,NAVY));LinearLayout actions=new LinearLayout(this);Button add=button("＋ إضافة دفعة",TEAL);add.setOnClickListener(v->showAdd());Button exp=button("الكروت المنتهية",DANGER);exp.setOnClickListener(v->showExpired());actions.addView(add,new LinearLayout.LayoutParams(0,58,1));actions.addView(exp,new LinearLayout.LayoutParams(0,58,1));body.addView(actions);space();Button load=button("تحميل الكروت من الراوتر",NAVY);load.setOnClickListener(v->loadUsers());body.addView(load);}
   void loadUsers(){if(client==null){toast("اتصل بالراوتر أولاً");return;}io.execute(()->{try{String path=backend.equals("User Manager 7")?"/user-manager/user/print":backend.equals("User Manager 6")?"/tool/user-manager/user/print":"/ip/hotspot/user/print";List<Map<String,String>> rows=client.print(path,".proplist=.id,name,username,profile,disabled,comment");runOnUiThread(()->{for(Map<String,String> r:rows){body.addView(text((r.getOrDefault("name",r.getOrDefault("username","—"))+"   "+r.getOrDefault("profile","—")),16,NAVY));}toast("تم تحميل "+rows.size()+" كرت");});}catch(Exception e){runOnUiThread(()->toast("تعذر تحميل الكروت: "+e.getMessage()));}});}
   EditText field(String hint,String value){EditText e=new EditText(this);e.setHint(hint);e.setText(value);e.setTextSize(16);e.setPadding(18,10,18,10);e.setBackground(shape(Color.WHITE,18));LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,58);p.setMargins(0,6,0,6);e.setLayoutParams(p);return e;}
