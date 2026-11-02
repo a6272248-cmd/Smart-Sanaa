@@ -13,39 +13,52 @@ public class MainActivity extends Activity {
   LinearLayout nav(){LinearLayout n=new LinearLayout(this);n.setPadding(5,6,5,6);String[] a={"الرئيسية","الكروت","الجلسات","التقارير","الإعدادات"};for(String x:a){Button b=button(x,Color.WHITE);b.setTextColor(NAVY);b.setTextSize(11);b.setOnClickListener(v->{switch(x){case "الرئيسية":showDashboard();break;case "الكروت":showCards();break;case "الجلسات":showSessions();break;case "التقارير":showReports();break;case "الصيانة":showMaintenance();break;default:showSettings();}});n.addView(b,new LinearLayout.LayoutParams(0,60,1));}return n;}
   void space(){Space s=new Space(this);body.addView(s,new LinearLayout.LayoutParams(1,12));}
   void card(String h,String v){LinearLayout c=new LinearLayout(this);c.setOrientation(LinearLayout.VERTICAL);c.setPadding(10,8,10,10);c.setBackground(shape(prefs.getBoolean("dark",false)?Color.rgb(26,49,74):Color.WHITE,24));c.addView(text(h,14,TEAL));TextView v1=text(v,23,prefs.getBoolean("dark",false)?Color.WHITE:NAVY);v1.setTypeface(null,1);c.addView(v1);body.addView(c);space();}
+  LinearLayout tile(String label,String value,int tint){
+    LinearLayout tile=new LinearLayout(this);tile.setOrientation(LinearLayout.VERTICAL);
+    tile.setPadding(9,14,9,14);tile.setBackground(shape(prefs.getBoolean("dark",false)?Color.rgb(26,49,74):Color.WHITE,22));
+    TextView name=text(label,12,tint);name.setGravity(Gravity.CENTER);tile.addView(name);
+    TextView number=text(value,17,prefs.getBoolean("dark",false)?Color.WHITE:NAVY);number.setTypeface(null,1);number.setGravity(Gravity.CENTER);tile.addView(number);
+    return tile;
+  }
+  void tiles(String[] names,String[] values,int[] tints){
+    LinearLayout row=new LinearLayout(this);row.setOrientation(LinearLayout.HORIZONTAL);
+    for(int i=0;i<names.length;i++){
+      LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,-2,1);p.setMargins(4,4,4,4);
+      row.addView(tile(names[i],values[i],tints[i]),p);
+    }
+    body.addView(row);space();
+  }
   void showDashboard(){
     base("الرئيسية");
-    LinearLayout hero=new LinearLayout(this);
-    hero.setOrientation(LinearLayout.VERTICAL);
-    hero.setPadding(18,18,18,18);
-    hero.setBackground(shape(Color.rgb(5,31,61),30));
-    TextView branding=text("سمارت صنعاء",29,Color.WHITE);
-    branding.setTypeface(null,1);hero.addView(branding);
-    hero.addView(text("MikroTik Network Management",14,Color.rgb(137,210,233)));
-    hero.addView(text("إدارة الشبكات المحلية • RouterOS 6 / 7",14,Color.WHITE));
-    body.addView(hero);space();
-    if(client==null){
-      Button connect=button("الاتصال بالراوتر",TEAL);
-      connect.setOnClickListener(v->showSettings());body.addView(connect);space();
-    }else{
-      Button refresh=button("↻ تحديث البيانات",TEAL);
-      refresh.setOnClickListener(v->loadDashboard());body.addView(refresh);space();
+    tiles(new String[]{"RouterOS","CPU","وقت التشغيل"},new String[]{version,resource.getOrDefault("cpu-load","—")+"%",resource.getOrDefault("uptime","—")},new int[]{Color.rgb(17,110,202),Color.rgb(118,70,219),Color.rgb(0,151,89)});
+    LinearLayout hero=new LinearLayout(this);hero.setOrientation(LinearLayout.VERTICAL);hero.setPadding(19,22,19,24);
+    hero.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,new int[]{Color.rgb(6,35,78),Color.rgb(2,86,139),Color.rgb(4,28,68)}));
+    TextView brand=text("سمارت صنعاء",27,Color.WHITE);brand.setTypeface(null,1);hero.addView(brand);
+    hero.addView(text("MikroTik Network Management",14,Color.WHITE));
+    hero.addView(text("RouterOS 6 / 7 • إدارة الشبكات المحلية",13,Color.rgb(164,234,248)));body.addView(hero);space();
+    String[] quickNames={"الرئيسية","إضافة كروت","عمليات الكروت"};
+    LinearLayout shortcuts=new LinearLayout(this);
+    for(String n:quickNames){Button btn=button(n,Color.rgb(226,246,250));btn.setTextColor(NAVY);btn.setTextSize(13);
+      btn.setOnClickListener(v->{if(n.equals("إضافة كروت"))showAdd();else if(n.equals("عمليات الكروت"))showCards();else showDashboard();});
+      LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,70,1);lp.setMargins(4,4,4,4);shortcuts.addView(btn,lp);
     }
-    card("RouterOS",version);
-    card("استخدام CPU",resource.getOrDefault("cpu-load","—")+"%");
-    card("مدة التشغيل",resource.getOrDefault("uptime","—"));
-    body.addView(text("الإحصاءات",22,prefs.getBoolean("dark",false)?Color.WHITE:NAVY));
-    card("PPPoE النشط",pppActive<0?"—":String.valueOf(pppActive));
-    card("Hotspot النشط",hotspotActive<0?"—":String.valueOf(hotspotActive));
+    body.addView(shortcuts);space();
+    tiles(new String[]{"Hotspot النشط","PPPoE النشط"},new String[]{hotspotActive<0?"—":String.valueOf(hotspotActive),pppActive<0?"—":String.valueOf(pppActive)},new int[]{TEAL,Color.rgb(119,84,211)});
     card("إجمالي كروت User Manager",umCount<0?"غير متاح":String.valueOf(umCount));
-    body.addView(text("الوصول السريع",22,prefs.getBoolean("dark",false)?Color.WHITE:NAVY));
-    String[] routes={"إضافة الكروت","عمليات الكروت","الجلسات","الكروت المنتهية","صيانة User Manager"};
-    for(String r:routes){
-      Button link=button("›   "+r,Color.rgb(18,89,132));
-      link.setOnClickListener(v->{switch(r){case "إضافة الكروت":showAdd();break;case "عمليات الكروت":showCards();break;case "الجلسات":showSessions();break;case "الكروت المنتهية":showExpired();break;default:showMaintenance();}});
-      body.addView(link);space();
+    body.addView(text("الوصول السريع",19,prefs.getBoolean("dark",false)?Color.WHITE:NAVY));
+    String[] routes={"الباقات","الجلسات","الكروت المنتهية","صيانة User Manager"};
+    for(int i=0;i<routes.length;i+=2){
+      LinearLayout row=new LinearLayout(this);
+      for(int j=i;j<Math.min(i+2,routes.length);j++){
+        String name=routes[j];Button link=button("›  "+name,Color.rgb(20,131,168));link.setTextSize(13);
+        link.setOnClickListener(v->{switch(name){case "الباقات":showCards();break;case "الجلسات":showSessions();break;case "الكروت المنتهية":showExpired();break;default:showMaintenance();}});
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,74,1);p.setMargins(4,4,4,4);row.addView(link,p);
+      }
+      body.addView(row);
     }
-    card("معلومات الراوتر",resource.getOrDefault("board-name","—")+"\n"+resource.getOrDefault("architecture-name","—")+"\nالذاكرة الحرة: "+resource.getOrDefault("free-memory","—")+"\nالتخزين الحر: "+resource.getOrDefault("free-hdd-space","—"));
+    space();card("معلومات النظام",resource.getOrDefault("board-name","—")+" | "+resource.getOrDefault("architecture-name","—")+"\nCPU: "+resource.getOrDefault("cpu-load","—")+"% | "+resource.getOrDefault("uptime","—")+"\nالذاكرة الحرة: "+resource.getOrDefault("free-memory","—")+"\nالتخزين الحر: "+resource.getOrDefault("free-hdd-space","—"));
+    Button action=button(client==null?"اتصال بالراوتر":"↻ تحديث من الراوتر",TEAL);
+    action.setOnClickListener(v->{if(client==null)showSettings();else loadDashboard();});body.addView(action);
   }
   void loadDashboard(){
     if(client==null){showSettings();return;}
