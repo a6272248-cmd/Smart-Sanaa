@@ -74,9 +74,9 @@ public class MainActivity extends Activity {
         pppActive=count("/ppp/active/print");
         umCount=-1;backend="غير متوفر";
         if(version.startsWith("7.")){
-          try{umCount=count("/user-manager/user/print");backend="User Manager 7";}catch(Exception ignored){}
+          int total=count("/user-manager/user/print");if(total>=0){umCount=total;backend="User Manager 7";}
         }else if(version.startsWith("6.")){
-          try{umCount=count("/tool/user-manager/user/print");backend="User Manager 6";}catch(Exception ignored){}
+          int total=count("/tool/user-manager/user/print");if(total>=0){umCount=total;backend="User Manager 6";}
         }
         runOnUiThread(()->{refreshing=false;showDashboard();});
       }catch(Exception e){runOnUiThread(()->{refreshing=false;toast("تعذر قراءة الراوتر: "+e.getMessage());});}
