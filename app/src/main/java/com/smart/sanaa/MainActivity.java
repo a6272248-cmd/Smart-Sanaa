@@ -63,8 +63,47 @@ public class MainActivity extends Activity {
   void showReports(){base("التقارير");body.addView(text("تقارير الاستخدام والكروت",22,NAVY));card("الكروت المنشأة","يُقرأ من الراوتر");card("الجلسات النشطة","يُقرأ من الراوتر");card("الكروت المنتهية","يُقرأ من الراوتر");}
   void showExpired(){base("الكروت المنتهية");body.addView(text("راجع النتائج قبل التعطيل أو الحذف",22,NAVY));Button b=button("إعادة فحص الكروت",TEAL);b.setOnClickListener(v->toast("سيتم فحص الكروت حسب بيانات RouterOS"));body.addView(b);card("User Manager","الكروت المنتهية");Button del=button("الحذف غير مفعل لحماية الكروت",MUTED);del.setOnClickListener(v->toast("يجب التحقق من الانتهاء وإنشاء Snapshot قبل تفعيل الحذف."));body.addView(del);body.addView(text("الكرت ذو التاريخ غير المعروف يبقى محفوظاً لأنه لم يُستخدم بعد.",14,MUTED));}
   void showMaintenance(){base("صيانة قاعدة البيانات");body.addView(text("أدوات User Manager الأصلية",22,NAVY));card("حجم القاعدة","يُقرأ من RouterOS");card("المساحة الحرة","يُقرأ من RouterOS");Button rebuild=button("إعادة بناء قاعدة البيانات (غير مفعلة)",MUTED);rebuild.setOnClickListener(v->toast("لن تُنفّذ صيانة على راوتر حقيقي قبل التحقق من توافق إصدار RouterOS."));body.addView(rebuild);Button exp=button("فتح الكروت المنتهية",TEAL);exp.setOnClickListener(v->showExpired());body.addView(exp);}
-  void showSettings(){base("الإعدادات والاتصال");body.addView(text("اتصال MikroTik API",22,NAVY));EditText host=field("عنوان الراوتر",prefs.getString("host","10.11.0.5"));EditText user=field("اسم المستخدم",prefs.getString("user","admin"));EditText pass=field("كلمة المرور","");body.addView(host);body.addView(user);body.addView(pass);Button b=button("اتصال واكتشاف User Manager",TEAL);b.setOnClickListener(v->connect(host.getText().toString(),user.getText().toString(),pass.getText().toString()));body.addView(b);}
-  void connect(String h,String u,String p){io.execute(()->{try{client=new RouterOsClient(h,8728,false,u,p);prefs.edit().putString("host",h).putString("user",u).apply();runOnUiThread(()->{toast("تم الاتصال بالراوتر");showDashboard();loadDashboard();});}catch(Exception e){runOnUiThread(()->toast("تعذر الاتصال: "+e.getMessage()));}});}
+  void showSettings(){
+    base("اتصال MikroTik");
+    body.addView(text("اتصال API مباشر بالشبكة المحلية",22,NAVY));
+    body.addView(text("أدخل عنوان الراوتر MikroTik نفسه، وليس عنوان لوحة OpenWrt.",14,MUTED));
+    EditText host=field("عنوان MikroTik IP",prefs.getString("host","10.11.0.1"));
+    EditText user=field("اسم المستخدم",prefs.getString("user","admin"));
+    EditText port=field("منفذ API",prefs.getString("port","8728"));
+    EditText pass=field("كلمة المرور","");
+    pass.setInputType(129);
+    CheckBox tls=new CheckBox(this);tls.setText("اتصال TLS مشفر (API-SSL)");tls.setChecked(prefs.getBoolean("tls",false));tls.setTextColor(NAVY);
+    body.addView(host);body.addView(port);body.addView(user);body.addView(pass);body.addView(tls);
+    body.addView(text("افتراضياً API = 8728 و API-SSL = 8729. يمكن اختيار TLS بمعزل عن المنفذ.",13,MUTED));
+    Button b=button("اتصال واكتشاف RouterOS",TEAL);
+    b.setOnClickListener(v->{
+      String address=host.getText().toString().trim();
+      String username=user.getText().toString().trim();
+      int numericPort;
+      try{numericPort=Integer.parseInt(port.getText().toString().trim());if(numericPort<1||numericPort>65535)throw new NumberFormatException();}
+      catch(NumberFormatException e){toast("المنفذ غير صالح");return;}
+      if(address.isEmpty()||username.isEmpty()){toast("أدخل العنوان واسم المستخدم");return;}
+      connect(address,numericPort,tls.isChecked(),username,pass.getText().toString());
+    });
+    body.addView(b);
+  }
+  void connect(String h,int port,boolean tls,String u,String p){
+    io.execute(()->{
+      RouterOsClient candidate=null;
+      try{
+        candidate=new RouterOsClient(h,port,tls,u,p);
+        List<Map<String,String>> resourceInfo=candidate.print("/system/resource/print");
+        if(resourceInfo.isEmpty())throw new IOException("RouterOS did not return system information");
+        if(client!=null)client.close();
+        client=candidate;
+        prefs.edit().putString("host",h).putString("port",String.valueOf(port)).putString("user",u).putBoolean("tls",tls).apply();
+        runOnUiThread(()->{toast("تم الاتصال بالراوتر");showDashboard();loadDashboard();});
+      }catch(Exception e){
+        if(candidate!=null&&candidate!=client)candidate.close();
+        runOnUiThread(()->toast("تعذر الاتصال: "+e.getMessage()));
+      }
+    });
+  }
   void confirm(String msg){new AlertDialog.Builder(this).setMessage(msg).setNegativeButton("إلغاء",null).setPositiveButton("متابعة",(d,w)->toast("العملية غير منفذة؛ يلزم التحقق من API أولاً" )).show();}
   void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
   @Override protected void onDestroy(){io.shutdownNow();if(client!=null)client.close();super.onDestroy();}
