@@ -1,10 +1,10 @@
 package com.smart.sanaa;
 
-import android.app.*;import android.os.*;import android.content.*;import android.graphics.Color;import android.graphics.drawable.GradientDrawable;import android.view.*;import android.widget.*;import java.util.*;import java.util.concurrent.*;
+import android.app.*;import android.os.*;import android.content.*;import android.graphics.Color;import android.graphics.drawable.GradientDrawable;import android.view.*;import android.widget.*;import java.util.*;import java.util.concurrent.*;import java.io.IOException;
 
 /** Native Smart Manager application. UI is backed by real RouterOS API calls. */
 public class MainActivity extends Activity {
-  final int NAVY=Color.rgb(16,42,67),TEAL=Color.rgb(21,155,168),MUTED=Color.rgb(107,124,147),SURFACE=Color.rgb(244,248,251),DANGER=Color.rgb(214,69,85); LinearLayout body; SharedPreferences prefs; ExecutorService io=Executors.newSingleThreadExecutor(); RouterOsClient client; String backend="hotspot",version="—";
+  final int NAVY=Color.rgb(16,42,67),TEAL=Color.rgb(21,155,168),MUTED=Color.rgb(107,124,147),SURFACE=Color.rgb(244,248,251),DANGER=Color.rgb(214,69,85); LinearLayout body; SharedPreferences prefs; ExecutorService io=Executors.newSingleThreadExecutor(); RouterOsClient client; String backend="unknown",version="—"; Map<String,String> resource=new HashMap<>(); int hotspotActive=-1,pppActive=-1,umCount=-1; boolean refreshing=false;
   @Override public void onCreate(Bundle b){super.onCreate(b);prefs=getSharedPreferences("router",0);showDashboard();}
   TextView text(String s,float z,int c){TextView t=new TextView(this);t.setText(s);t.setTextSize(z);t.setTextColor(c);t.setPadding(18,12,18,12);t.setGravity(Gravity.RIGHT|Gravity.CENTER_VERTICAL);return t;}
   GradientDrawable shape(int c,float r){GradientDrawable g=new GradientDrawable();g.setColor(c);g.setCornerRadius(r);return g;}
@@ -13,21 +13,59 @@ public class MainActivity extends Activity {
   LinearLayout nav(){LinearLayout n=new LinearLayout(this);n.setPadding(5,6,5,6);String[] a={"الرئيسية","الكروت","الجلسات","التقارير","الصيانة","الإعدادات"};for(String x:a){Button b=button(x,Color.WHITE);b.setTextColor(NAVY);b.setTextSize(11);b.setOnClickListener(v->{switch(x){case "الرئيسية":showDashboard();break;case "الكروت":showCards();break;case "الجلسات":showSessions();break;case "التقارير":showReports();break;case "الصيانة":showMaintenance();break;default:showSettings();}});n.addView(b,new LinearLayout.LayoutParams(0,60,1));}return n;}
   void space(){Space s=new Space(this);body.addView(s,new LinearLayout.LayoutParams(1,12));}
   void card(String h,String v){LinearLayout c=new LinearLayout(this);c.setOrientation(LinearLayout.VERTICAL);c.setPadding(10,8,10,10);c.setBackground(shape(Color.WHITE,24));c.addView(text(h,14,TEAL));TextView v1=text(v,23,NAVY);v1.setTypeface(null,1);c.addView(v1);body.addView(c);space();}
-  void showDashboard(){base("الرئيسية");body.addView(text("Smart Manager",28,NAVY));body.addView(text("إدارة MikroTik وUser Manager من هاتفك",16,MUTED));Button connect=button(client==null?"اتصال بالراوتر":"تحديث بيانات الراوتر",TEAL);connect.setOnClickListener(v->showSettings());body.addView(connect);space();card("RouterOS",version);card("User Manager",backend.equals("hotspot")?"لم يتم الاكتشاف":"تم اكتشاف "+backend);card("Hotspot النشط","—");card("إجمالي User Manager","—");}
-  void loadDashboard(){io.execute(()->{try{List<Map<String,String>> r=client.print("/system/resource/print",".proplist=version,uptime,cpu-load,free-memory,total-memory,free-hdd-space,total-hdd-space");List<Map<String,String>> v7=client.print("/user-manager/user/print","count-only=");backend="um7";version=r.isEmpty()?"—":r.get(0).getOrDefault("version","—");runOnUiThread(()->showDashboard());}catch(Exception e){runOnUiThread(()->toast("فشل تحديث البيانات: "+e.getMessage()));}});}
+  void showDashboard(){base("الرئيسية");body.addView(text("Smart Manager",28,NAVY));body.addView(text("إدارة MikroTik وUser Manager من هاتفك",16,MUTED));Button connect=button(client==null?"اتصال بالراوتر":"تحديث بيانات الراوتر",TEAL);connect.setOnClickListener(v->{if(client==null)showSettings();else loadDashboard();});body.addView(connect);space();card("RouterOS",version);card("CPU",resource.getOrDefault("cpu-load","—")+"%");card("مدة التشغيل",resource.getOrDefault("uptime","—"));card("Hotspot النشط",hotspotActive<0?"—":String.valueOf(hotspotActive));card("PPPoE النشط",pppActive<0?"—":String.valueOf(pppActive));card("إجمالي User Manager",umCount<0?"غير متاح":String.valueOf(umCount));card("نوع User Manager",backend);}
+  void loadDashboard(){
+    if(client==null){showSettings();return;}
+    if(refreshing)return;
+    refreshing=true;
+    io.execute(()->{
+      try{
+        List<Map<String,String>> r=client.print("/system/resource/print");
+        if(r.isEmpty())throw new IllegalStateException("No RouterOS resource data");
+        resource=new HashMap<>(r.get(0));
+        version=resource.getOrDefault("version","—");
+        hotspotActive=count("/ip/hotspot/active/print");
+        pppActive=count("/ppp/active/print");
+        umCount=-1;backend="غير متوفر";
+        if(version.startsWith("7.")){
+          try{umCount=count("/user-manager/user/print");backend="User Manager 7";}catch(Exception ignored){}
+        }else if(version.startsWith("6.")){
+          try{umCount=count("/tool/user-manager/user/print");backend="User Manager 6";}catch(Exception ignored){}
+        }
+        runOnUiThread(()->{refreshing=false;showDashboard();});
+      }catch(Exception e){runOnUiThread(()->{refreshing=false;toast("تعذر قراءة الراوتر: "+e.getMessage());});}
+    });
+  }
+  int count(String path){try{return client.print(path).size();}catch(Exception e){return -1;}}
   void showCards(){base("الكروت");body.addView(text("إدارة الكروت والمستخدمين",22,NAVY));LinearLayout actions=new LinearLayout(this);Button add=button("＋ إضافة دفعة",TEAL);add.setOnClickListener(v->showAdd());Button exp=button("الكروت المنتهية",DANGER);exp.setOnClickListener(v->showExpired());actions.addView(add,new LinearLayout.LayoutParams(0,58,1));actions.addView(exp,new LinearLayout.LayoutParams(0,58,1));body.addView(actions);space();Button load=button("تحميل الكروت من الراوتر",NAVY);load.setOnClickListener(v->loadUsers());body.addView(load);}
-  void loadUsers(){if(client==null){toast("اتصل بالراوتر أولاً");return;}io.execute(()->{try{String path=backend.equals("um7")?"/user-manager/user/print":backend.equals("um6")?"/tool/user-manager/user/print":"/ip/hotspot/user/print";List<Map<String,String>> rows=client.print(path,".proplist=.id,name,username,profile,disabled,comment");runOnUiThread(()->{for(Map<String,String> r:rows){body.addView(text((r.getOrDefault("name",r.getOrDefault("username","—"))+"   "+r.getOrDefault("profile","—")),16,NAVY));}toast("تم تحميل "+rows.size()+" كرت");});}catch(Exception e){runOnUiThread(()->toast("تعذر تحميل الكروت: "+e.getMessage()));}});}
+  void loadUsers(){if(client==null){toast("اتصل بالراوتر أولاً");return;}io.execute(()->{try{String path=backend.equals("User Manager 7")?"/user-manager/user/print":backend.equals("User Manager 6")?"/tool/user-manager/user/print":"/ip/hotspot/user/print";List<Map<String,String>> rows=client.print(path,".proplist=.id,name,username,profile,disabled,comment");runOnUiThread(()->{for(Map<String,String> r:rows){body.addView(text((r.getOrDefault("name",r.getOrDefault("username","—"))+"   "+r.getOrDefault("profile","—")),16,NAVY));}toast("تم تحميل "+rows.size()+" كرت");});}catch(Exception e){runOnUiThread(()->toast("تعذر تحميل الكروت: "+e.getMessage()));}});}
   EditText field(String hint,String value){EditText e=new EditText(this);e.setHint(hint);e.setText(value);e.setTextSize(16);e.setPadding(18,10,18,10);e.setBackground(shape(Color.WHITE,18));LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,58);p.setMargins(0,6,0,6);e.setLayoutParams(p);return e;}
   void showAdd(){base("إضافة الكروت");body.addView(text("إنشاء دفعة حقيقية على MikroTik",22,NAVY));EditText names=field("بادئة اسم المستخدم","sm");EditText count=field("عدد الكروت 1–50","10");EditText profile=field("البروفايل","default");body.addView(names);body.addView(count);body.addView(profile);Button preview=button("معاينة الدفعة",TEAL);preview.setOnClickListener(v->confirmAdd(names.getText().toString(),count.getText().toString(),profile.getText().toString()));body.addView(preview);}
   void confirmAdd(String prefix,String count,String profile){int n;try{n=Math.max(1,Math.min(50,Integer.parseInt(count)));}catch(Exception e){n=10;}final int total=n;new AlertDialog.Builder(this).setTitle("تأكيد إنشاء الكروت").setMessage("سيتم إنشاء "+total+" كرت فعلياً على الراوتر.").setNegativeButton("إلغاء",null).setPositiveButton("إنشاء",(d,w)->createBatch(prefix,total,profile)).show();}
-  void createBatch(String prefix,int n,String profile){if(client==null){toast("اتصل بالراوتر أولاً");return;}io.execute(()->{try{String path=backend.equals("um7")?"/user-manager/user/add":backend.equals("um6")?"/tool/user-manager/user/add":"/ip/hotspot/user/add";for(int i=1;i<=n;i++){String name=prefix+i;client.run(path,"=name="+name,"=password="+name,"=profile="+profile,"=comment=Smart Sanaa");}runOnUiThread(()->toast("تم إنشاء "+n+" كرت فعلياً"));}catch(Exception e){runOnUiThread(()->toast("توقفت الدفعة: "+e.getMessage()));}});}
-  void showSessions(){base("الجلسات");body.addView(text("الجلسات النشطة من RouterOS",22,NAVY));Button b=button("↻ تحميل الجلسات",TEAL);b.setOnClickListener(v->{if(client==null)toast("اتصل بالراوتر أولاً");else toast("جارٍ تحميل الجلسات...");});body.addView(b);}
+  void createBatch(String prefix,int n,String profile){if(client==null){toast("اتصل بالراوتر أولاً");return;}io.execute(()->{try{String path=backend.equals("User Manager 7")?"/user-manager/user/add":backend.equals("User Manager 6")?"/tool/user-manager/user/add":"/ip/hotspot/user/add";for(int i=1;i<=n;i++){String name=prefix+i;List<Map<String,String>> existing=client.print(path.replace("/add","/print"),"?name="+name);if(!existing.isEmpty())throw new IOException("اسم موجود مسبقاً: "+name);client.run(path,"=name="+name,"=password="+name,"=profile="+profile,"=comment=Smart Sanaa");}runOnUiThread(()->toast("تم إنشاء "+n+" كرت فعلياً"));}catch(Exception e){runOnUiThread(()->toast("توقفت الدفعة: "+e.getMessage()));}});}
+  void showSessions(){base("الجلسات");body.addView(text("جلسات Hotspot وPPPoE النشطة",22,NAVY));Button b=button("↻ تحميل الجلسات",TEAL);b.setOnClickListener(v->loadSessions());body.addView(b);}
+  void loadSessions(){
+    if(client==null){toast("اتصل بالراوتر أولاً");return;}
+    io.execute(()->{
+      try{
+        List<Map<String,String>> hs=client.print("/ip/hotspot/active/print");
+        List<Map<String,String>> ppp=client.print("/ppp/active/print");
+        runOnUiThread(()->{
+          base("الجلسات النشطة");
+          card("Hotspot",String.valueOf(hs.size()));
+          for(Map<String,String> x:hs)card(x.getOrDefault("user","—"),x.getOrDefault("address","—")+"  "+x.getOrDefault("uptime",""));
+          card("PPPoE",String.valueOf(ppp.size()));
+          for(Map<String,String> x:ppp)card(x.getOrDefault("name","—"),x.getOrDefault("address","—")+"  "+x.getOrDefault("uptime",""));
+        });
+      }catch(Exception e){runOnUiThread(()->toast("خطأ قراءة الجلسات: "+e.getMessage()));}
+    });
+  }
   void showReports(){base("التقارير");body.addView(text("تقارير الاستخدام والكروت",22,NAVY));card("الكروت المنشأة","يُقرأ من الراوتر");card("الجلسات النشطة","يُقرأ من الراوتر");card("الكروت المنتهية","يُقرأ من الراوتر");}
-  void showExpired(){base("الكروت المنتهية");body.addView(text("راجع النتائج قبل التعطيل أو الحذف",22,NAVY));Button b=button("إعادة فحص الكروت",TEAL);b.setOnClickListener(v->toast("سيتم فحص الكروت حسب بيانات RouterOS"));body.addView(b);card("User Manager","الكروت المنتهية");Button del=button("حذف بعد Snapshot مؤكد",DANGER);del.setOnClickListener(v->confirm("سيتم حذف الكروت المحددة فقط. متابعة؟"));body.addView(del);body.addView(text("الكرت ذو التاريخ غير المعروف يبقى محفوظاً لأنه لم يُستخدم بعد.",14,MUTED));}
-  void showMaintenance(){base("صيانة قاعدة البيانات");body.addView(text("أدوات User Manager الأصلية",22,NAVY));card("حجم القاعدة","يُقرأ من RouterOS");card("المساحة الحرة","يُقرأ من RouterOS");Button rebuild=button("نسخة احتياطية ثم إعادة البناء",DANGER);rebuild.setOnClickListener(v->confirm("قد تتوقف المصادقة مؤقتاً أثناء إعادة البناء."));body.addView(rebuild);Button exp=button("فتح الكروت المنتهية",TEAL);exp.setOnClickListener(v->showExpired());body.addView(exp);}
+  void showExpired(){base("الكروت المنتهية");body.addView(text("راجع النتائج قبل التعطيل أو الحذف",22,NAVY));Button b=button("إعادة فحص الكروت",TEAL);b.setOnClickListener(v->toast("سيتم فحص الكروت حسب بيانات RouterOS"));body.addView(b);card("User Manager","الكروت المنتهية");Button del=button("الحذف غير مفعل لحماية الكروت",MUTED);del.setOnClickListener(v->toast("يجب التحقق من الانتهاء وإنشاء Snapshot قبل تفعيل الحذف."));body.addView(del);body.addView(text("الكرت ذو التاريخ غير المعروف يبقى محفوظاً لأنه لم يُستخدم بعد.",14,MUTED));}
+  void showMaintenance(){base("صيانة قاعدة البيانات");body.addView(text("أدوات User Manager الأصلية",22,NAVY));card("حجم القاعدة","يُقرأ من RouterOS");card("المساحة الحرة","يُقرأ من RouterOS");Button rebuild=button("إعادة بناء قاعدة البيانات (غير مفعلة)",MUTED);rebuild.setOnClickListener(v->toast("لن تُنفّذ صيانة على راوتر حقيقي قبل التحقق من توافق إصدار RouterOS."));body.addView(rebuild);Button exp=button("فتح الكروت المنتهية",TEAL);exp.setOnClickListener(v->showExpired());body.addView(exp);}
   void showSettings(){base("الإعدادات والاتصال");body.addView(text("اتصال MikroTik API",22,NAVY));EditText host=field("عنوان الراوتر",prefs.getString("host","10.11.0.5"));EditText user=field("اسم المستخدم",prefs.getString("user","admin"));EditText pass=field("كلمة المرور","");body.addView(host);body.addView(user);body.addView(pass);Button b=button("اتصال واكتشاف User Manager",TEAL);b.setOnClickListener(v->connect(host.getText().toString(),user.getText().toString(),pass.getText().toString()));body.addView(b);}
   void connect(String h,String u,String p){io.execute(()->{try{client=new RouterOsClient(h,8728,false,u,p);prefs.edit().putString("host",h).putString("user",u).apply();runOnUiThread(()->{toast("تم الاتصال بالراوتر");showDashboard();loadDashboard();});}catch(Exception e){runOnUiThread(()->toast("تعذر الاتصال: "+e.getMessage()));}});}
-  void confirm(String msg){new AlertDialog.Builder(this).setMessage(msg).setNegativeButton("إلغاء",null).setPositiveButton("متابعة",(d,w)->toast("تم تأكيد العملية" )).show();}
+  void confirm(String msg){new AlertDialog.Builder(this).setMessage(msg).setNegativeButton("إلغاء",null).setPositiveButton("متابعة",(d,w)->toast("العملية غير منفذة؛ يلزم التحقق من API أولاً" )).show();}
   void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
   @Override protected void onDestroy(){io.shutdownNow();if(client!=null)client.close();super.onDestroy();}
 }
