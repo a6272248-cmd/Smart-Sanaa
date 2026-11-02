@@ -109,7 +109,30 @@ public class MainActivity extends Activity {
     });
   }
   void showReports(){base("التقارير");body.addView(text("تقارير الاستخدام والكروت",22,NAVY));card("إجمالي User Manager",umCount<0?"غير متاح":String.valueOf(umCount));card("جلسات Hotspot",hotspotActive<0?"غير متاح":String.valueOf(hotspotActive));card("جلسات PPPoE",pppActive<0?"غير متاح":String.valueOf(pppActive));}
-  void showExpired(){base("الكروت المنتهية");body.addView(text("راجع النتائج قبل التعطيل أو الحذف",22,NAVY));Button b=button("فحص الكروت المنتهية غير متاح بعد",MUTED);b.setOnClickListener(v->toast("يجب إكمال تحليل مدة الاستخدام والانتهاء الحقيقي لكل إصدار قبل التفعيل"));body.addView(b);card("User Manager","الكروت المنتهية");Button del=button("الحذف غير مفعل لحماية الكروت",MUTED);del.setOnClickListener(v->toast("يجب التحقق من الانتهاء وإنشاء Snapshot قبل تفعيل الحذف."));body.addView(del);body.addView(text("غير معروف = كرت لم يبدأ استخدامه. لا يتم حذفه.",14,MUTED));}
+  void showExpired(){
+    base("الكروت المنتهية");
+    body.addView(text("فحص حسب بيانات الاستخدام الفعلية من RouterOS",19,NAVY));
+    body.addView(text("الكروت التي لم تبدأ الاستخدام لا تدخل ضمن النتائج.",14,MUTED));
+    Button scan=button("↻ فحص الكروت المنتهية",TEAL);scan.setOnClickListener(v->loadExpired());body.addView(scan);
+    body.addView(text("الحذف غير مفعل حتى تُراجع النتائج وتختبر سلامته على إصدار الراوتر.",13,MUTED));
+  }
+  void loadExpired(){
+    if(client==null){toast("اتصل بالراوتر أولاً");return;}
+    io.execute(()->{
+      try{
+        List<Map<String,String>> expired=ExpiredScanner.scan(client,backend);
+        runOnUiThread(()->{
+          showExpired();card("عدد الكروت المنتهية",String.valueOf(expired.size()));
+          int limit=Math.min(100,expired.size());
+          for(int i=0;i<limit;i++){
+            Map<String,String> r=expired.get(i);
+            card(r.getOrDefault("name",r.getOrDefault("username","—")),"معرف: "+r.getOrDefault(".id","—"));
+          }
+          if(expired.size()>limit)body.addView(text("تظهر أول "+limit+" نتيجة فقط لتخفيف الحمل على الهاتف.",14,MUTED));
+        });
+      }catch(Exception e){runOnUiThread(()->toast("تعذر فحص المنتهية: "+e.getMessage()));}
+    });
+  }
   void showMaintenance(){base("صيانة قاعدة البيانات");body.addView(text("أدوات User Manager الأصلية",22,NAVY));card("RouterOS",version);card("التخزين الحر على الراوتر",resource.getOrDefault("free-hdd-space","غير متاح"));body.addView(text("لا تُشغّل إعادة بناء قاعدة User Manager دون نسخة UMB صالحة واختبار الأوامر حسب إصدار الراوتر.",14,MUTED));Button rebuild=button("إعادة بناء قاعدة البيانات (غير مفعلة)",MUTED);rebuild.setOnClickListener(v->toast("لن تُنفّذ صيانة على راوتر حقيقي قبل التحقق من توافق إصدار RouterOS."));body.addView(rebuild);Button exp=button("فتح الكروت المنتهية",TEAL);exp.setOnClickListener(v->showExpired());body.addView(exp);}
   void showSettings(){
     base("اتصال MikroTik");
