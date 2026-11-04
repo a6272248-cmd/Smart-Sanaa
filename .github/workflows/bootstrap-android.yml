@@ -1,10 +1,10 @@
-name: Smart Manager Enterprise 2026 - Build V2 APK
+name: Smart Manager Enterprise 2026 - Build V3 APK
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - 'SmartManagerEnterprise-BUILD-FIX-V2.zip'
+      - 'SmartManagerEnterprise-BUILD-FIX-V3.zip'
       - '.github/workflows/bootstrap-android.yml'
 
 permissions:
@@ -21,9 +21,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -f SmartManagerEnterprise-BUILD-FIX-V2.zip
+          test -f SmartManagerEnterprise-BUILD-FIX-V3.zip
           mkdir -p "$RUNNER_TEMP/smartmanager"
-          unzip -q SmartManagerEnterprise-BUILD-FIX-V2.zip -d "$RUNNER_TEMP/smartmanager"
+          unzip -q SmartManagerEnterprise-BUILD-FIX-V3.zip -d "$RUNNER_TEMP/smartmanager"
           project="$RUNNER_TEMP/smartmanager/SmartManagerEnterprise"
           test -f "$project/settings.gradle.kts"
           test -f "$project/app/build.gradle.kts"
@@ -64,7 +64,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: SmartManagerEnterprise-v2-debug-APK
+          name: SmartManagerEnterprise-v3-debug-APK
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
       - name: Upload diagnostics on failure
