@@ -1,82 +1,76 @@
-name: Extract Smart Manager and Build APK
+name: Smart Manager Enterprise 2026 - Build Fixed APK
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - 'SmartManagerEnterprise-GitHub-Source.zip'
+      - 'SmartManagerEnterprise-Enterprise-FIXED.zip'
       - '.github/workflows/bootstrap-android.yml'
 
 permissions:
   contents: read
 
 jobs:
-  extract-build:
+  enterprise-apk:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
-      - name: Checkout repository
+      - name: Checkout source archive
         uses: actions/checkout@v4
-
-      - name: Extract project for this build (no Git push)
+      - name: Extract fixed Enterprise project
         shell: bash
         run: |
           set -euo pipefail
-          test -f SmartManagerEnterprise-GitHub-Source.zip
+          test -f SmartManagerEnterprise-Enterprise-FIXED.zip
           mkdir -p "$RUNNER_TEMP/smartmanager"
-          unzip -q SmartManagerEnterprise-GitHub-Source.zip -d "$RUNNER_TEMP/smartmanager"
+          unzip -q SmartManagerEnterprise-Enterprise-FIXED.zip -d "$RUNNER_TEMP/smartmanager"
           project="$RUNNER_TEMP/smartmanager/SmartManagerEnterprise"
           test -f "$project/settings.gradle.kts"
           test -f "$project/app/build.gradle.kts"
+          test -f "$project/app/src/main/java/com/smartsanaa/manager/RouterOs.kt"
           cp -a "$project/." .
-          test -f app/src/main/java/com/smartsanaa/manager/MainActivity.kt
-
+          echo 'Enterprise project extracted successfully'
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
-      - name: Locate preinstalled Android SDK
+      - name: Verify Android SDK and install API 36
         shell: bash
         run: |
           set -euo pipefail
           sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-          test -d "$sdk" || { echo "Android SDK directory missing: $sdk"; exit 1; }
+          test -d "$sdk"
+          sdkmanager="$sdk/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$sdkmanager" ]]; then
+            sdkmanager="$(find "$sdk/cmdline-tools" -type f -name sdkmanager -print -quit)"
+          fi
+          test -n "$sdkmanager" && test -x "$sdkmanager"
           echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
-          echo "$sdk/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-          echo "$sdk/platform-tools" >> "$GITHUB_PATH"
-          if test -x "$sdk/cmdline-tools/latest/bin/sdkmanager"; then
-            echo "SDKMANAGER=$sdk/cmdline-tools/latest/bin/sdkmanager" >> "$GITHUB_ENV"
-          else
-            candidate="$(find "$sdk/cmdline-tools" -name sdkmanager -type f 2>/dev/null | head -n 1)"
-            test -n "$candidate" || { echo 'sdkmanager not found in installed SDK'; exit 1; }
-            echo "SDKMANAGER=$candidate" >> "$GITHUB_ENV"
-          fi
-          echo "Using Android SDK: $sdk"
-
-      - name: Install Android SDK 36 and build tools
-        shell: bash
-        run: |
-          set -euo pipefail
-          yes | "$SDKMANAGER" --licenses > /dev/null || true
-          "$SDKMANAGER" --install 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools'
-          test -f "$ANDROID_HOME/platforms/android-36/android.jar"
-
-      - name: Set up Gradle
+          yes | "$sdkmanager" --licenses > /dev/null || true
+          "$sdkmanager" --install 'platforms;android-36' 'build-tools;36.0.0'
+          test -f "$sdk/platforms/android-36/android.jar"
+      - name: Set up Gradle 8.13
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-
-      - name: Build debug APK
+      - name: Compile and build Android APK
         shell: bash
-        run: gradle --no-daemon --stacktrace :app:assembleDebug
-
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee "$RUNNER_TEMP/enterprise-build.log"
       - name: Upload APK artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: SmartManagerEnterprise-debug-apk
+          name: SmartManagerEnterprise-fixed-debug-APK
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: enterprise-build-diagnostics
+          path: ${{ runner.temp }}/enterprise-build.log
+          if-no-files-found: ignore
