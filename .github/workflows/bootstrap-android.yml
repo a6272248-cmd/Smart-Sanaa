@@ -1,4 +1,4 @@
-name: Smart Manager Enterprise V4 - Safe APK Build
+name: Smart Manager Enterprise V4 - Updated UI APK Build
 
 on:
   push:
@@ -25,7 +25,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          EXPECTED_SHA=c2a6e85f7937445f2b099859329c751a27873f2d7c556545be4271a5572b6321
+          EXPECTED_SHA=21bc416a54726073ced24f2e438960100c54eec512128e8e677ed3a92d9cf974
           shopt -s nullglob
           archive=''
           for candidate in SmartManagerEnterprise-V4-FINAL*.zip; do
@@ -36,7 +36,7 @@ jobs:
             fi
           done
           if [[ -z "$archive" ]]; then
-            echo 'ERROR: V4 ZIP not found or SHA-256 differs from the reviewed Codex V4 archive.' >&2
+            echo 'ERROR: Updated V4 ZIP not found or SHA-256 differs from the newly reviewed UI archive.' >&2
             echo 'Required SHA-256:' "$EXPECTED_SHA" >&2
             ls -la
             exit 1
@@ -49,10 +49,9 @@ jobs:
           test -f enterprise/app/src/main/AndroidManifest.xml
           test -f enterprise/app/src/main/java/com/smartsanaa/manager/RouterOs.kt
           test -f enterprise/app/src/main/java/com/smartsanaa/manager/MainActivity.kt
+          test -f enterprise/app/src/test/java/com/smartsanaa/manager/RouterWireTest.kt
           echo 'Source extracted and required project files verified.'
-          if [[ ! -d enterprise/app/src/test ]] && [[ ! -d enterprise/app/src/androidTest ]]; then
-            echo '::warning::V4 ZIP includes no Android unit or instrumentation test sources. Gradle testDebugUnitTest may be NO-SOURCE.'
-          fi
+          echo 'RouterWireTest.kt exists; the actual test outcome will be determined by Gradle.'
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
