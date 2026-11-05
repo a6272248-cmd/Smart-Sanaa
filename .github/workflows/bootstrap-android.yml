@@ -1,76 +1,161 @@
-name: Smart Manager Enterprise 2026 - Build V3 APK
+name: Smart Manager Enterprise V4 - Safe APK Build
 
 on:
-  workflow_dispatch:
   push:
+    branches:
+      - feature/smart-manager-enterprise-v4
     paths:
-      - 'SmartManagerEnterprise-BUILD-FIX-V3.zip'
-      - '.github/workflows/bootstrap-android.yml'
+      - 'SmartManagerEnterprise-V4-FINAL*.zip'
+      - '.github/workflows/build-enterprise-v4.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  enterprise-apk:
+  enterprise-v4:
+    name: Verify and build V4 (isolated branch)
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 50
     steps:
-      - name: Checkout source archive
+      - name: Check out the selected branch
         uses: actions/checkout@v4
-      - name: Extract fixed Enterprise project
+
+      - name: Verify uploaded V4 archive and unpack sources
         shell: bash
         run: |
           set -euo pipefail
-          test -f SmartManagerEnterprise-BUILD-FIX-V3.zip
-          mkdir -p "$RUNNER_TEMP/smartmanager"
-          unzip -q SmartManagerEnterprise-BUILD-FIX-V3.zip -d "$RUNNER_TEMP/smartmanager"
-          project="$RUNNER_TEMP/smartmanager/SmartManagerEnterprise"
-          test -f "$project/settings.gradle.kts"
-          test -f "$project/app/build.gradle.kts"
-          test -f "$project/app/src/main/java/com/smartsanaa/manager/RouterOs.kt"
-          cp -a "$project/." .
-          echo 'Enterprise project extracted successfully'
+          EXPECTED_SHA=c2a6e85f7937445f2b099859329c751a27873f2d7c556545be4271a5572b6321
+          shopt -s nullglob
+          archive=''
+          for candidate in SmartManagerEnterprise-V4-FINAL*.zip; do
+            actual=$(sha256sum "$candidate" | cut -d ' ' -f1)
+            if [[ "$actual" == "$EXPECTED_SHA" ]]; then
+              archive="$candidate"
+              break
+            fi
+          done
+          if [[ -z "$archive" ]]; then
+            echo 'ERROR: V4 ZIP not found or SHA-256 differs from the reviewed Codex V4 archive.' >&2
+            echo 'Required SHA-256:' "$EXPECTED_SHA" >&2
+            ls -la
+            exit 1
+          fi
+          echo "Verified archive: $archive"
+          echo "V4_ARCHIVE=$archive" >> "$GITHUB_ENV"
+          unzip -q "$archive" -d "$GITHUB_WORKSPACE"
+          test -f enterprise/settings.gradle.kts
+          test -f enterprise/app/build.gradle.kts
+          test -f enterprise/app/src/main/AndroidManifest.xml
+          test -f enterprise/app/src/main/java/com/smartsanaa/manager/RouterOs.kt
+          test -f enterprise/app/src/main/java/com/smartsanaa/manager/MainActivity.kt
+          echo 'Source extracted and required project files verified.'
+          if [[ ! -d enterprise/app/src/test ]] && [[ ! -d enterprise/app/src/androidTest ]]; then
+            echo '::warning::V4 ZIP includes no Android unit or instrumentation test sources. Gradle testDebugUnitTest may be NO-SOURCE.'
+          fi
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - name: Verify Android SDK and install API 36
+
+      - name: Configure installed Android SDK and install Android 36
         shell: bash
         run: |
           set -euo pipefail
           sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-          test -d "$sdk"
-          sdkmanager="$sdk/cmdline-tools/latest/bin/sdkmanager"
-          if [[ ! -x "$sdkmanager" ]]; then
-            sdkmanager="$(find "$sdk/cmdline-tools" -type f -name sdkmanager -print -quit)"
+          test -d "$sdk" || { echo "Android SDK missing: $sdk" >&2; exit 1; }
+          manager="$sdk/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$manager" ]]; then
+            manager="$(find "$sdk/cmdline-tools" -type f -name sdkmanager -print -quit)"
           fi
-          test -n "$sdkmanager" && test -x "$sdkmanager"
+          test -x "$manager" || { echo 'sdkmanager missing' >&2; exit 1; }
           echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
-          yes | "$sdkmanager" --licenses > /dev/null || true
-          "$sdkmanager" --install 'platforms;android-36' 'build-tools;36.0.0'
-          test -f "$sdk/platforms/android-36/android.jar"
+          yes | "$manager" --licenses > /dev/null || true
+          "$manager" --install 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools'
+          test -s "$sdk/platforms/android-36/android.jar"
+          test -x "$sdk/build-tools/36.0.0/apksigner"
+
       - name: Set up Gradle 8.13
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-      - name: Compile and build Android APK
+
+      - name: Run unit tests (where present)
+        working-directory: enterprise
         shell: bash
         run: |
           set -o pipefail
-          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee "$RUNNER_TEMP/enterprise-build.log"
-      - name: Upload APK artifact
-        if: success()
+          gradle --no-daemon :app:testDebugUnitTest --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/v4-tests.log"
+
+      - name: Run Android lint
+        working-directory: enterprise
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:lintDebug --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/v4-lint.log"
+
+      - name: Compile debug APK
+        working-directory: enterprise
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/v4-build.log"
+
+      - name: Verify APK signature, package name, and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=enterprise/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          TOOLS="$ANDROID_HOME/build-tools/36.0.0"
+          "$TOOLS/apksigner" verify --verbose --print-certs "$APK" | tee v4-apk-signature.txt
+          "$TOOLS/aapt" dump badging "$APK" | tee v4-apk-badging.txt
+          grep -F "package: name='com.smartsanaa.manager'" v4-apk-badging.txt
+          sha256sum "$APK" | tee v4-apk-SHA256SUMS.txt
+
+      - name: Package extracted source with branch workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip -qr SmartManagerEnterprise-V4-verified-source.zip enterprise .github/workflows/build-enterprise-v4.yml \
+            -x 'enterprise/.gradle/*' 'enterprise/build/*' 'enterprise/app/build/*'
+          sha256sum SmartManagerEnterprise-V4-verified-source.zip > v4-source-SHA256SUMS.txt
+
+      - name: Upload installable debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: SmartManagerEnterprise-v3-debug-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: SmartManagerEnterprise-V4-debug-APK
+          path: |
+            enterprise/app/build/outputs/apk/debug/app-debug.apk
+            v4-apk-SHA256SUMS.txt
+            v4-apk-signature.txt
+            v4-apk-badging.txt
           if-no-files-found: error
-      - name: Upload diagnostics on failure
-        if: failure()
+          retention-days: 30
+
+      - name: Upload source archive
         uses: actions/upload-artifact@v4
         with:
-          name: enterprise-build-diagnostics
-          path: ${{ runner.temp }}/enterprise-build.log
+          name: SmartManagerEnterprise-V4-source
+          path: |
+            SmartManagerEnterprise-V4-verified-source.zip
+            v4-source-SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build diagnostics on success or failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartManagerEnterprise-V4-diagnostics
+          path: |
+            v4-tests.log
+            v4-lint.log
+            v4-build.log
+            enterprise/app/build/reports/tests/
+            enterprise/app/build/reports/lint-results-debug.html
           if-no-files-found: ignore
+          retention-days: 14
