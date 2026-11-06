@@ -112,16 +112,23 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android API 36 build requirements
+      - name: Configure preinstalled Android SDK and API 36
         run: |
           set -euo pipefail
-          sdkmanager --install 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools'
-          test -s "$ANDROID_HOME/platforms/android-36/android.jar"
-          test -x "$ANDROID_HOME/build-tools/36.0.0/apksigner"
-          test -x "$ANDROID_HOME/build-tools/36.0.0/aapt"
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          test -d "$sdk" || { echo "Android SDK directory missing: $sdk" >&2; exit 1; }
+          manager="$sdk/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$manager" ]]; then
+            manager="$(find "$sdk/cmdline-tools" -type f -name sdkmanager -print -quit)"
+          fi
+          test -x "$manager" || { echo 'sdkmanager is not installed on this runner' >&2; exit 1; }
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
+          "$manager" --licenses < <(yes) > /dev/null
+          "$manager" --install 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools'
+          test -s "$sdk/platforms/android-36/android.jar"
+          test -x "$sdk/build-tools/36.0.0/apksigner"
+          test -x "$sdk/build-tools/36.0.0/aapt"
 
       - name: Set up Gradle 8.13
         uses: gradle/actions/setup-gradle@v4
