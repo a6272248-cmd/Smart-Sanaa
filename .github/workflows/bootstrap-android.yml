@@ -1,11 +1,11 @@
-name: Smart Sanaa V5 - Native Android APK
+name: Smart Sanaa V8 - Native Android APK
 
 on:
   push:
     branches:
       - feature/smart-manager-enterprise-v4
     paths:
-      - 'Smart-Sanaa-V5-Android-Source.zip'
+      - 'Smart-Sanaa-V8-FIXED.zip'
       - '.github/workflows/bootstrap-android.yml'
   workflow_dispatch:
 
@@ -13,15 +13,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: smart-sanaa-v5-${{ github.ref }}
+  group: smart-sanaa-v8-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  build-v5:
-    name: Validate sources, test, lint and build V5 APK
+  build-v8:
+    name: Verify, test, lint and build native Android V8
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-
     defaults:
       run:
         shell: bash
@@ -30,81 +29,61 @@ jobs:
       - name: Check out the selected branch
         uses: actions/checkout@v4
 
-      - name: Validate and extract V5 Android sources
+      - name: Verify uploaded V8 archive and extract project
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          from pathlib import Path, PurePosixPath
-          from zipfile import ZipFile, BadZipFile
           import os
           import stat
+          from pathlib import Path, PurePosixPath
+          from zipfile import ZipFile
 
-          archive = Path("Smart-Sanaa-V5-Android-Source.zip")
-          destination = Path("v5-source")
-
+          archive = Path('Smart-Sanaa-V8-FIXED.zip')
+          dest = Path('v8-source')
           if not archive.is_file() or archive.stat().st_size == 0:
-              raise SystemExit(f"Missing or empty V5 archive: {archive}")
-
-          destination.mkdir(exist_ok=True)
+              raise SystemExit('V8 archive not found or empty on this branch')
           with ZipFile(archive) as z:
               if z.testzip() is not None:
-                  raise SystemExit("Corrupted file inside the V5 ZIP")
-
-              seen = set()
-              file_count = 0
-              total_size = 0
-
+                  raise SystemExit('V8 ZIP CRC validation failed')
+              seen, size, count = set(), 0, 0
               for entry in z.infolist():
                   name = entry.filename
-                  posix = PurePosixPath(name)
+                  path = PurePosixPath(name)
                   mode = (entry.external_attr >> 16) & 0xFFFF
-                  if (not name or name.startswith("/") or "\\" in name
-                      or ".." in posix.parts or "." in posix.parts
-                      or ":" in name or stat.S_ISLNK(mode)):
-                      raise SystemExit(f"Unsafe ZIP entry: {name!r}")
+                  if (not name or name.startswith('/') or '\\' in name or
+                      any(part in ('.', '..') for part in path.parts) or
+                      ':' in name or stat.S_ISLNK(mode)):
+                      raise SystemExit(f'Unsafe ZIP entry: {name}')
                   if name in seen:
-                      raise SystemExit(f"Duplicate ZIP entry: {name!r}")
+                      raise SystemExit(f'Duplicate ZIP entry: {name}')
                   seen.add(name)
                   if not entry.is_dir():
-                      file_count += 1
-                      total_size += entry.file_size
-
-              if file_count < 10:
-                  raise SystemExit(f"Incomplete source archive: {file_count} files")
-              if total_size > 500 * 1024 * 1024:
-                  raise SystemExit("Unexpectedly large uncompressed source archive")
-              z.extractall(destination)
+                      size += entry.file_size
+                      count += 1
+              if count < 10 or size > 500 * 1024 * 1024:
+                  raise SystemExit(f'Unexpected ZIP contents: {count} files, {size} bytes')
+              dest.mkdir(exist_ok=True)
+              z.extractall(dest)
 
           required = (
-              "settings.gradle.kts",
-              "build.gradle.kts",
-              "app/build.gradle.kts",
-              "app/src/main/AndroidManifest.xml",
-              "app/src/main/java/com/smartsanaa/manager/MainActivity.kt",
-              "app/src/main/java/com/smartsanaa/manager/RouterOs.kt",
-              "app/src/test/java/com/smartsanaa/manager/RouterWireTest.kt",
+              'settings.gradle.kts',
+              'build.gradle.kts',
+              'app/build.gradle.kts',
+              'app/src/main/AndroidManifest.xml',
+              'app/src/main/java/com/smartsanaa/manager/MainActivity.kt',
+              'app/src/main/java/com/smartsanaa/manager/RouterOs.kt',
+              'app/src/test/java/com/smartsanaa/manager/RouterWireTest.kt',
           )
-
-          # Accept a ZIP whose project is at its root or in one top-level folder.
-          candidates = [destination]
-          candidates.extend(p for p in destination.iterdir() if p.is_dir())
-          projects = [p for p in candidates if all((p / rel).is_file() for rel in required)]
-
+          candidates = [dest] + [p for p in dest.iterdir() if p.is_dir()]
+          projects = [p for p in candidates if all((p / x).is_file() for x in required)]
           if len(projects) != 1:
-              print("Top-level extracted items:")
-              for item in sorted(destination.iterdir()):
-                  print("  ", item)
-              raise SystemExit(
-                  f"Expected one complete Android project; found {len(projects)}. "
-                  "Check the source ZIP layout and required Kotlin files."
-              )
-
-          project = projects[0]
-          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
-              env.write(f"PROJECT_DIR={project.as_posix()}\n")
-          print(f"Verified {file_count} source files. Project: {project}")
+              raise SystemExit(f'Expected exactly one Android project; found {len(projects)}')
+          project = projects[0].as_posix()
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env:
+              env.write(f'PROJECT_DIR={project}\n')
+          print(f'Extracted {count} verified source files. Project: {project}')
           PY
-          sha256sum Smart-Sanaa-V5-Android-Source.zip | tee V5-source-SHA256SUMS.txt
+          sha256sum Smart-Sanaa-V8-FIXED.zip | tee V8-source-SHA256SUMS.txt
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -112,19 +91,19 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Configure preinstalled Android SDK and API 36
+      - name: Set up Android SDK 36
         run: |
           set -euo pipefail
           sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-          test -d "$sdk" || { echo "Android SDK directory missing: $sdk" >&2; exit 1; }
+          test -d "$sdk" || { echo "Android SDK missing: $sdk" >&2; exit 1; }
           manager="$sdk/cmdline-tools/latest/bin/sdkmanager"
           if [[ ! -x "$manager" ]]; then
             manager="$(find "$sdk/cmdline-tools" -type f -name sdkmanager -print -quit)"
           fi
-          test -x "$manager" || { echo 'sdkmanager is not installed on this runner' >&2; exit 1; }
+          test -x "$manager" || { echo 'Android sdkmanager missing' >&2; exit 1; }
           echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
-          "$manager" --licenses < <(yes) > /dev/null
+          yes | "$manager" --licenses >/dev/null || true
           "$manager" --install 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools'
           test -s "$sdk/platforms/android-36/android.jar"
           test -x "$sdk/build-tools/36.0.0/apksigner"
@@ -135,45 +114,45 @@ jobs:
         with:
           gradle-version: '8.13'
 
-      - name: Run V5 unit tests
+      - name: Run V8 unit tests
         run: |
-          set -euo pipefail
+          set -o pipefail
           cd "$PROJECT_DIR"
-          gradle --no-daemon :app:testDebugUnitTest --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/v5-tests.log"
+          gradle --no-daemon :app:testDebugUnitTest --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/v8-tests.log"
 
-      - name: Run V5 Android lint
+      - name: Run V8 Android lint
         run: |
-          set -euo pipefail
+          set -o pipefail
           cd "$PROJECT_DIR"
-          gradle --no-daemon :app:lintDebug --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/v5-lint.log"
+          gradle --no-daemon :app:lintDebug --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/v8-lint.log"
 
-      - name: Build V5 debug APK
+      - name: Build V8 debug APK
         run: |
-          set -euo pipefail
+          set -o pipefail
           cd "$PROJECT_DIR"
-          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/v5-build.log"
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/v8-build.log"
 
-      - name: Verify APK signature, package and SHA-256
+      - name: Verify APK signature and package
         run: |
           set -euo pipefail
           apk="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
           tools="$ANDROID_HOME/build-tools/36.0.0"
           test -s "$apk"
-          "$tools/apksigner" verify --verbose --print-certs "$apk" | tee V5-apk-signature.txt
-          "$tools/aapt" dump badging "$apk" | tee V5-apk-badging.txt
-          grep -F "package: name='com.smartsanaa.manager'" V5-apk-badging.txt
-          sha256sum "$apk" | tee V5-APK-SHA256SUMS.txt
+          "$tools/apksigner" verify --verbose --print-certs "$apk" | tee V8-apk-signature.txt
+          "$tools/aapt" dump badging "$apk" | tee V8-apk-badging.txt
+          grep -F "package: name='com.smartsanaa.manager'" V8-apk-badging.txt
+          sha256sum "$apk" | tee V8-APK-SHA256SUMS.txt
 
-      - name: Upload verified V5 debug APK
+      - name: Upload verified V8 debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: Smart-Sanaa-V5-debug-APK
+          name: Smart-Sanaa-V8-debug-APK
           path: |
-            v5-source/**/app/build/outputs/apk/debug/app-debug.apk
-            V5-APK-SHA256SUMS.txt
-            V5-apk-signature.txt
-            V5-apk-badging.txt
-            V5-source-SHA256SUMS.txt
+            v8-source/**/app/build/outputs/apk/debug/app-debug.apk
+            V8-APK-SHA256SUMS.txt
+            V8-apk-signature.txt
+            V8-apk-badging.txt
+            V8-source-SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
 
@@ -181,12 +160,12 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Smart-Sanaa-V5-build-diagnostics
+          name: Smart-Sanaa-V8-build-diagnostics
           path: |
-            v5-tests.log
-            v5-lint.log
-            v5-build.log
-            v5-source/**/app/build/reports/tests/
-            v5-source/**/app/build/reports/lint-results-debug.html
+            v8-tests.log
+            v8-lint.log
+            v8-build.log
+            v8-source/**/app/build/reports/tests/
+            v8-source/**/app/build/reports/lint-results-debug.html
           if-no-files-found: ignore
           retention-days: 14
