@@ -1,76 +1,192 @@
-name: Smart Manager Enterprise 2026 - Build V3 APK
+name: Smart Sanaa V5 - Native Android APK
 
 on:
-  workflow_dispatch:
   push:
+    branches:
+      - feature/smart-manager-enterprise-v4
     paths:
-      - 'SmartManagerEnterprise-BUILD-FIX-V3.zip'
+      - 'Smart-Sanaa-V5-Android-Source.zip'
       - '.github/workflows/bootstrap-android.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: smart-sanaa-v5-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  enterprise-apk:
+  build-v5:
+    name: Validate sources, test, lint and build V5 APK
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    steps:
-      - name: Checkout source archive
-        uses: actions/checkout@v4
-      - name: Extract fixed Enterprise project
+    timeout-minutes: 60
+
+    defaults:
+      run:
         shell: bash
+
+    steps:
+      - name: Check out the selected branch
+        uses: actions/checkout@v4
+
+      - name: Validate and extract V5 Android sources
         run: |
           set -euo pipefail
-          test -f SmartManagerEnterprise-BUILD-FIX-V3.zip
-          mkdir -p "$RUNNER_TEMP/smartmanager"
-          unzip -q SmartManagerEnterprise-BUILD-FIX-V3.zip -d "$RUNNER_TEMP/smartmanager"
-          project="$RUNNER_TEMP/smartmanager/SmartManagerEnterprise"
-          test -f "$project/settings.gradle.kts"
-          test -f "$project/app/build.gradle.kts"
-          test -f "$project/app/src/main/java/com/smartsanaa/manager/RouterOs.kt"
-          cp -a "$project/." .
-          echo 'Enterprise project extracted successfully'
+          python3 - <<'PY'
+          from pathlib import Path, PurePosixPath
+          from zipfile import ZipFile, BadZipFile
+          import os
+          import stat
+
+          archive = Path("Smart-Sanaa-V5-Android-Source.zip")
+          destination = Path("v5-source")
+
+          if not archive.is_file() or archive.stat().st_size == 0:
+              raise SystemExit(f"Missing or empty V5 archive: {archive}")
+
+          destination.mkdir(exist_ok=True)
+          with ZipFile(archive) as z:
+              if z.testzip() is not None:
+                  raise SystemExit("Corrupted file inside the V5 ZIP")
+
+              seen = set()
+              file_count = 0
+              total_size = 0
+
+              for entry in z.infolist():
+                  name = entry.filename
+                  posix = PurePosixPath(name)
+                  mode = (entry.external_attr >> 16) & 0xFFFF
+                  if (not name or name.startswith("/") or "\\" in name
+                      or ".." in posix.parts or "." in posix.parts
+                      or ":" in name or stat.S_ISLNK(mode)):
+                      raise SystemExit(f"Unsafe ZIP entry: {name!r}")
+                  if name in seen:
+                      raise SystemExit(f"Duplicate ZIP entry: {name!r}")
+                  seen.add(name)
+                  if not entry.is_dir():
+                      file_count += 1
+                      total_size += entry.file_size
+
+              if file_count < 10:
+                  raise SystemExit(f"Incomplete source archive: {file_count} files")
+              if total_size > 500 * 1024 * 1024:
+                  raise SystemExit("Unexpectedly large uncompressed source archive")
+              z.extractall(destination)
+
+          required = (
+              "settings.gradle.kts",
+              "build.gradle.kts",
+              "app/build.gradle.kts",
+              "app/src/main/AndroidManifest.xml",
+              "app/src/main/java/com/smartsanaa/manager/MainActivity.kt",
+              "app/src/main/java/com/smartsanaa/manager/RouterOs.kt",
+              "app/src/test/java/com/smartsanaa/manager/RouterWireTest.kt",
+          )
+
+          # Accept a ZIP whose project is at its root or in one top-level folder.
+          candidates = [destination]
+          candidates.extend(p for p in destination.iterdir() if p.is_dir())
+          projects = [p for p in candidates if all((p / rel).is_file() for rel in required)]
+
+          if len(projects) != 1:
+              print("Top-level extracted items:")
+              for item in sorted(destination.iterdir()):
+                  print("  ", item)
+              raise SystemExit(
+                  f"Expected one complete Android project; found {len(projects)}. "
+                  "Check the source ZIP layout and required Kotlin files."
+              )
+
+          project = projects[0]
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
+              env.write(f"PROJECT_DIR={project.as_posix()}\n")
+          print(f"Verified {file_count} source files. Project: {project}")
+          PY
+          sha256sum Smart-Sanaa-V5-Android-Source.zip | tee V5-source-SHA256SUMS.txt
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - name: Verify Android SDK and install API 36
-        shell: bash
+
+      - name: Configure preinstalled Android SDK and API 36
         run: |
           set -euo pipefail
           sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-          test -d "$sdk"
-          sdkmanager="$sdk/cmdline-tools/latest/bin/sdkmanager"
-          if [[ ! -x "$sdkmanager" ]]; then
-            sdkmanager="$(find "$sdk/cmdline-tools" -type f -name sdkmanager -print -quit)"
+          test -d "$sdk" || { echo "Android SDK directory missing: $sdk" >&2; exit 1; }
+          manager="$sdk/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$manager" ]]; then
+            manager="$(find "$sdk/cmdline-tools" -type f -name sdkmanager -print -quit)"
           fi
-          test -n "$sdkmanager" && test -x "$sdkmanager"
+          test -x "$manager" || { echo 'sdkmanager is not installed on this runner' >&2; exit 1; }
           echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
-          yes | "$sdkmanager" --licenses > /dev/null || true
-          "$sdkmanager" --install 'platforms;android-36' 'build-tools;36.0.0'
-          test -f "$sdk/platforms/android-36/android.jar"
+          "$manager" --licenses < <(yes) > /dev/null
+          "$manager" --install 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools'
+          test -s "$sdk/platforms/android-36/android.jar"
+          test -x "$sdk/build-tools/36.0.0/apksigner"
+          test -x "$sdk/build-tools/36.0.0/aapt"
+
       - name: Set up Gradle 8.13
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-      - name: Compile and build Android APK
-        shell: bash
+
+      - name: Run V5 unit tests
         run: |
-          set -o pipefail
-          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee "$RUNNER_TEMP/enterprise-build.log"
-      - name: Upload APK artifact
-        if: success()
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+          gradle --no-daemon :app:testDebugUnitTest --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/v5-tests.log"
+
+      - name: Run V5 Android lint
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+          gradle --no-daemon :app:lintDebug --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/v5-lint.log"
+
+      - name: Build V5 debug APK
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/v5-build.log"
+
+      - name: Verify APK signature, package and SHA-256
+        run: |
+          set -euo pipefail
+          apk="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+          tools="$ANDROID_HOME/build-tools/36.0.0"
+          test -s "$apk"
+          "$tools/apksigner" verify --verbose --print-certs "$apk" | tee V5-apk-signature.txt
+          "$tools/aapt" dump badging "$apk" | tee V5-apk-badging.txt
+          grep -F "package: name='com.smartsanaa.manager'" V5-apk-badging.txt
+          sha256sum "$apk" | tee V5-APK-SHA256SUMS.txt
+
+      - name: Upload verified V5 debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: SmartManagerEnterprise-v3-debug-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: Smart-Sanaa-V5-debug-APK
+          path: |
+            v5-source/**/app/build/outputs/apk/debug/app-debug.apk
+            V5-APK-SHA256SUMS.txt
+            V5-apk-signature.txt
+            V5-apk-badging.txt
+            V5-source-SHA256SUMS.txt
           if-no-files-found: error
-      - name: Upload diagnostics on failure
-        if: failure()
+          retention-days: 30
+
+      - name: Upload build diagnostics on success or failure
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: enterprise-build-diagnostics
-          path: ${{ runner.temp }}/enterprise-build.log
+          name: Smart-Sanaa-V5-build-diagnostics
+          path: |
+            v5-tests.log
+            v5-lint.log
+            v5-build.log
+            v5-source/**/app/build/reports/tests/
+            v5-source/**/app/build/reports/lint-results-debug.html
           if-no-files-found: ignore
+          retention-days: 14
