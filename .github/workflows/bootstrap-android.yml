@@ -1,11 +1,12 @@
-name: Smart Sanaa V8 - Native Android APK
+name: Smart Sanaa V9 - Native Android APK
 
 on:
   push:
     branches:
       - feature/smart-manager-enterprise-v4
     paths:
-      - 'Smart-Sanaa-V8-FIXED.zip'
+      - 'SmartSanaaV9.zip'
+      - 'SmartSanaaV9-source.tar.gz'
       - '.github/workflows/bootstrap-android.yml'
   workflow_dispatch:
 
@@ -13,12 +14,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: smart-sanaa-v8-${{ github.ref }}
+  group: smart-sanaa-v9-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  build-v8:
-    name: Verify, test, lint and build native Android V8
+  build-v9:
+    name: Verify source, test, lint and build Android V9
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     defaults:
@@ -26,10 +27,10 @@ jobs:
         shell: bash
 
     steps:
-      - name: Check out the selected branch
+      - name: Check out selected branch
         uses: actions/checkout@v4
 
-      - name: Verify uploaded V8 archive and extract project
+      - name: Validate V9 ZIP and extract Android project
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -38,32 +39,33 @@ jobs:
           from pathlib import Path, PurePosixPath
           from zipfile import ZipFile
 
-          archive = Path('Smart-Sanaa-V8-FIXED.zip')
-          dest = Path('v8-source')
-          if not archive.is_file() or archive.stat().st_size == 0:
-              raise SystemExit('V8 archive not found or empty on this branch')
+          archive = Path('SmartSanaaV9.zip')
+          destination = Path('v9-source')
+          if not archive.is_file() or not archive.stat().st_size:
+              raise SystemExit('SmartSanaaV9.zip missing or empty in the selected branch')
           with ZipFile(archive) as z:
-              if z.testzip() is not None:
-                  raise SystemExit('V8 ZIP CRC validation failed')
+              bad = z.testzip()
+              if bad:
+                  raise SystemExit(f'ZIP checksum failure: {bad}')
               seen, size, count = set(), 0, 0
               for entry in z.infolist():
-                  name = entry.filename
-                  path = PurePosixPath(name)
+                  path = PurePosixPath(entry.filename)
                   mode = (entry.external_attr >> 16) & 0xFFFF
-                  if (not name or name.startswith('/') or '\\' in name or
-                      any(part in ('.', '..') for part in path.parts) or
-                      ':' in name or stat.S_ISLNK(mode)):
-                      raise SystemExit(f'Unsafe ZIP entry: {name}')
-                  if name in seen:
-                      raise SystemExit(f'Duplicate ZIP entry: {name}')
-                  seen.add(name)
+                  if (not entry.filename or entry.filename.startswith('/') or
+                      '\\' in entry.filename or ':' in entry.filename or
+                      any(p in ('.', '..') for p in path.parts) or
+                      stat.S_ISLNK(mode)):
+                      raise SystemExit(f'Unsafe ZIP entry: {entry.filename}')
+                  if entry.filename in seen:
+                      raise SystemExit(f'Duplicate ZIP path: {entry.filename}')
+                  seen.add(entry.filename)
                   if not entry.is_dir():
-                      size += entry.file_size
                       count += 1
+                      size += entry.file_size
               if count < 10 or size > 500 * 1024 * 1024:
-                  raise SystemExit(f'Unexpected ZIP contents: {count} files, {size} bytes')
-              dest.mkdir(exist_ok=True)
-              z.extractall(dest)
+                  raise SystemExit(f'Unexpected archive: {count} files, {size} bytes')
+              destination.mkdir(exist_ok=True)
+              z.extractall(destination)
 
           required = (
               'settings.gradle.kts',
@@ -74,16 +76,15 @@ jobs:
               'app/src/main/java/com/smartsanaa/manager/RouterOs.kt',
               'app/src/test/java/com/smartsanaa/manager/RouterWireTest.kt',
           )
-          candidates = [dest] + [p for p in dest.iterdir() if p.is_dir()]
-          projects = [p for p in candidates if all((p / x).is_file() for x in required)]
+          candidates = [destination] + [p for p in destination.iterdir() if p.is_dir()]
+          projects = [p for p in candidates if all((p / f).is_file() for f in required)]
           if len(projects) != 1:
-              raise SystemExit(f'Expected exactly one Android project; found {len(projects)}')
-          project = projects[0].as_posix()
+              raise SystemExit(f'Expected one Android project; found {len(projects)}')
           with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env:
-              env.write(f'PROJECT_DIR={project}\n')
-          print(f'Extracted {count} verified source files. Project: {project}')
+              env.write(f'PROJECT_DIR={projects[0].as_posix()}\n')
+          print(f'Validated {count} project files in {projects[0]}')
           PY
-          sha256sum Smart-Sanaa-V8-FIXED.zip | tee V8-source-SHA256SUMS.txt
+          sha256sum SmartSanaaV9.zip | tee V9-source-SHA256SUMS.txt
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -100,7 +101,7 @@ jobs:
           if [[ ! -x "$manager" ]]; then
             manager="$(find "$sdk/cmdline-tools" -type f -name sdkmanager -print -quit)"
           fi
-          test -x "$manager" || { echo 'Android sdkmanager missing' >&2; exit 1; }
+          test -x "$manager" || { echo 'sdkmanager missing' >&2; exit 1; }
           echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
           yes | "$manager" --licenses >/dev/null || true
@@ -114,58 +115,58 @@ jobs:
         with:
           gradle-version: '8.13'
 
-      - name: Run V8 unit tests
+      - name: Run V9 unit tests
         run: |
           set -o pipefail
           cd "$PROJECT_DIR"
-          gradle --no-daemon :app:testDebugUnitTest --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/v8-tests.log"
+          gradle --no-daemon :app:testDebugUnitTest --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/v9-tests.log"
 
-      - name: Run V8 Android lint
+      - name: Run V9 Android lint
         run: |
           set -o pipefail
           cd "$PROJECT_DIR"
-          gradle --no-daemon :app:lintDebug --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/v8-lint.log"
+          gradle --no-daemon :app:lintDebug --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/v9-lint.log"
 
-      - name: Build V8 debug APK
+      - name: Build V9 debug APK
         run: |
           set -o pipefail
           cd "$PROJECT_DIR"
-          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/v8-build.log"
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/v9-build.log"
 
-      - name: Verify APK signature and package
+      - name: Verify APK signing, package, and checksum
         run: |
           set -euo pipefail
           apk="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
           tools="$ANDROID_HOME/build-tools/36.0.0"
           test -s "$apk"
-          "$tools/apksigner" verify --verbose --print-certs "$apk" | tee V8-apk-signature.txt
-          "$tools/aapt" dump badging "$apk" | tee V8-apk-badging.txt
-          grep -F "package: name='com.smartsanaa.manager'" V8-apk-badging.txt
-          sha256sum "$apk" | tee V8-APK-SHA256SUMS.txt
+          "$tools/apksigner" verify --verbose --print-certs "$apk" | tee V9-apk-signature.txt
+          "$tools/aapt" dump badging "$apk" | tee V9-apk-badging.txt
+          grep -F "package: name='com.smartsanaa.manager'" V9-apk-badging.txt
+          sha256sum "$apk" | tee V9-APK-SHA256SUMS.txt
 
-      - name: Upload verified V8 debug APK
+      - name: Upload V9 debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: Smart-Sanaa-V8-debug-APK
+          name: Smart-Sanaa-V9-debug-APK
           path: |
-            v8-source/**/app/build/outputs/apk/debug/app-debug.apk
-            V8-APK-SHA256SUMS.txt
-            V8-apk-signature.txt
-            V8-apk-badging.txt
-            V8-source-SHA256SUMS.txt
+            v9-source/**/app/build/outputs/apk/debug/app-debug.apk
+            V9-APK-SHA256SUMS.txt
+            V9-apk-signature.txt
+            V9-apk-badging.txt
+            V9-source-SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
 
-      - name: Upload build diagnostics on success or failure
+      - name: Upload diagnostics on success or failure
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Smart-Sanaa-V8-build-diagnostics
+          name: Smart-Sanaa-V9-build-diagnostics
           path: |
-            v8-tests.log
-            v8-lint.log
-            v8-build.log
-            v8-source/**/app/build/reports/tests/
-            v8-source/**/app/build/reports/lint-results-debug.html
+            v9-tests.log
+            v9-lint.log
+            v9-build.log
+            v9-source/**/app/build/reports/tests/
+            v9-source/**/app/build/reports/lint-results-debug.html
           if-no-files-found: ignore
           retention-days: 14
