@@ -5,6 +5,7 @@ on:
     branches:
       - feature/smart-manager-enterprise-v4
     paths:
+      - 'SmartSanaaV9-PrintScreen-Updated-Source.zip'
       - 'SmartSanaaV9.zip'
       - 'SmartSanaaV9-source.tar.gz'
       - '.github/workflows/bootstrap-android.yml'
@@ -25,12 +26,11 @@ jobs:
     defaults:
       run:
         shell: bash
-
     steps:
       - name: Check out selected branch
         uses: actions/checkout@v4
 
-      - name: Validate V9 ZIP and extract Android project
+      - name: Validate updated ZIP and extract Android project
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -39,10 +39,11 @@ jobs:
           from pathlib import Path, PurePosixPath
           from zipfile import ZipFile
 
-          archive = Path('SmartSanaaV9.zip')
+          preferred = Path('SmartSanaaV9-PrintScreen-Updated-Source.zip')
+          archive = preferred if preferred.is_file() else Path('SmartSanaaV9.zip')
           destination = Path('v9-source')
           if not archive.is_file() or not archive.stat().st_size:
-              raise SystemExit('SmartSanaaV9.zip missing or empty in the selected branch')
+              raise SystemExit('Android source ZIP missing or empty in this branch')
           with ZipFile(archive) as z:
               bad = z.testzip()
               if bad:
@@ -66,7 +67,6 @@ jobs:
                   raise SystemExit(f'Unexpected archive: {count} files, {size} bytes')
               destination.mkdir(exist_ok=True)
               z.extractall(destination)
-
           required = (
               'settings.gradle.kts',
               'build.gradle.kts',
@@ -82,9 +82,13 @@ jobs:
               raise SystemExit(f'Expected one Android project; found {len(projects)}')
           with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env:
               env.write(f'PROJECT_DIR={projects[0].as_posix()}\n')
-          print(f'Validated {count} project files in {projects[0]}')
+          print(f'Verified source {archive}: {count} files, project {projects[0]}')
           PY
-          sha256sum SmartSanaaV9.zip | tee V9-source-SHA256SUMS.txt
+          if [[ -s SmartSanaaV9-PrintScreen-Updated-Source.zip ]]; then
+            sha256sum SmartSanaaV9-PrintScreen-Updated-Source.zip | tee V9-source-SHA256SUMS.txt
+          else
+            sha256sum SmartSanaaV9.zip | tee V9-source-SHA256SUMS.txt
+          fi
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
