@@ -1,94 +1,152 @@
-name: Smart Sanaa V9 - Native Android APK
+name: Smart Sanaa - Automatic Native Android APK
 
 on:
   push:
     branches:
       - feature/smart-manager-enterprise-v4
-    paths:
-      - 'SmartSanaaV9-PrintScreen-Updated-Source.zip'
-      - 'SmartSanaaV9.zip'
-      - 'SmartSanaaV9-source.tar.gz'
-      - '.github/workflows/bootstrap-android.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: smart-sanaa-v9-${{ github.ref }}
+  group: smart-sanaa-android-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  build-v9:
-    name: Verify source, test, lint and build Android V9
+  build-android:
+    name: Validate latest source, test, lint and build
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     defaults:
       run:
         shell: bash
-    steps:
-      - name: Check out selected branch
-        uses: actions/checkout@v4
 
-      - name: Validate updated ZIP and extract Android project
+    steps:
+      - name: Check out selected branch with history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find changed source and securely extract Android project
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
+          import hashlib
           import os
+          import re
+          import shutil
           import stat
+          import subprocess
+          import tarfile
+          import zipfile
           from pathlib import Path, PurePosixPath
-          from zipfile import ZipFile
 
-          preferred = Path('SmartSanaaV9-PrintScreen-Updated-Source.zip')
-          archive = preferred if preferred.is_file() else Path('SmartSanaaV9.zip')
-          destination = Path('v9-source')
-          if not archive.is_file() or not archive.stat().st_size:
-              raise SystemExit('Android source ZIP missing or empty in this branch')
-          with ZipFile(archive) as z:
-              bad = z.testzip()
-              if bad:
-                  raise SystemExit(f'ZIP checksum failure: {bad}')
-              seen, size, count = set(), 0, 0
-              for entry in z.infolist():
-                  path = PurePosixPath(entry.filename)
-                  mode = (entry.external_attr >> 16) & 0xFFFF
-                  if (not entry.filename or entry.filename.startswith('/') or
-                      '\\' in entry.filename or ':' in entry.filename or
-                      any(p in ('.', '..') for p in path.parts) or
-                      stat.S_ISLNK(mode)):
-                      raise SystemExit(f'Unsafe ZIP entry: {entry.filename}')
-                  if entry.filename in seen:
-                      raise SystemExit(f'Duplicate ZIP path: {entry.filename}')
-                  seen.add(entry.filename)
-                  if not entry.is_dir():
-                      count += 1
-                      size += entry.file_size
-              if count < 10 or size > 500 * 1024 * 1024:
-                  raise SystemExit(f'Unexpected archive: {count} files, {size} bytes')
-              destination.mkdir(exist_ok=True)
-              z.extractall(destination)
           required = (
               'settings.gradle.kts',
               'build.gradle.kts',
               'app/build.gradle.kts',
               'app/src/main/AndroidManifest.xml',
-              'app/src/main/java/com/smartsanaa/manager/MainActivity.kt',
-              'app/src/main/java/com/smartsanaa/manager/RouterOs.kt',
-              'app/src/test/java/com/smartsanaa/manager/RouterWireTest.kt',
           )
-          candidates = [destination] + [p for p in destination.iterdir() if p.is_dir()]
-          projects = [p for p in candidates if all((p / f).is_file() for f in required)]
+          output = Path('extracted-android-source')
+
+          def run_git(*args):
+              return subprocess.run(['git', *args], check=True, capture_output=True, text=True).stdout.strip()
+
+          def is_candidate(path):
+              return path.is_file() and path.parent == Path('.') and bool(
+                  re.fullmatch(r'SmartSanaa.*\.(?:zip|tar\.gz|tgz)', path.name, flags=re.I)
+              )
+
+          archives = [p for p in Path('.').iterdir() if is_candidate(p)]
+          before = os.environ.get('BEFORE_SHA', '')
+          current = os.environ['CURRENT_SHA']
+          changed = []
+          if re.fullmatch(r'[0-9a-f]{40}', before) and before != '0' * 40:
+              check = subprocess.run(['git', 'cat-file', '-e', before + '^{commit}'], capture_output=True)
+              if check.returncode == 0:
+                  changed = run_git('diff', '--name-only', before, current).splitlines()
+          changed_archives = [p for p in archives if p.name in changed]
+          if len(changed_archives) > 1:
+              raise SystemExit('Multiple SmartSanaa source archives changed together. Upload only one current source archive per commit.')
+
+          # On workflow_dispatch, use the most recently committed matching archive.
+          # Do not accidentally build an older archive when newer native sources were changed.
+          if changed_archives:
+              archive = changed_archives[0]
+          elif archives:
+              archive = max(archives, key=lambda p: (
+                  int(run_git('log', '-1', '--format=%ct', '--', p.name) or '0'), p.name
+              ))
+          else:
+              archive = None
+
+          if archive is not None:
+              print('Selected source archive:', archive, flush=True)
+              if archive.stat().st_size == 0:
+                  raise SystemExit('Selected source archive is empty')
+              entries = []
+              zip_kind = archive.name.lower().endswith('.zip')
+              if zip_kind:
+                  with zipfile.ZipFile(archive) as z:
+                      bad = z.testzip()
+                      if bad:
+                          raise SystemExit('ZIP CRC error: ' + bad)
+                      for m in z.infolist():
+                          mode = (m.external_attr >> 16) & 0xffff
+                          unsafe_type = stat.S_ISLNK(mode) or (mode != 0 and not (stat.S_ISREG(mode) or stat.S_ISDIR(mode)))
+                          entries.append((m.filename, m.file_size, m.is_dir(), unsafe_type))
+              else:
+                  with tarfile.open(archive, 'r:gz') as z:
+                      for m in z.getmembers():
+                          entries.append((m.name, m.size, m.isdir(), not (m.isfile() or m.isdir())))
+
+              seen = set()
+              for name, size, is_dir, unsafe in entries:
+                  path = PurePosixPath(name)
+                  canonical = str(path)
+                  if (unsafe or not name or name.startswith('/') or '\\' in name or ':' in name or
+                      '..' in path.parts or canonical in seen):
+                      raise SystemExit('Unsafe or duplicate archive entry: ' + name)
+                  seen.add(canonical)
+              if len(entries) < 10 or sum(size for _, size, is_dir, _ in entries if not is_dir) > 500 * 1024 * 1024:
+                  raise SystemExit('Invalid source archive size or content')
+
+              output.mkdir(exist_ok=True)
+              if zip_kind:
+                  with zipfile.ZipFile(archive) as z:
+                      z.extractall(output)
+              else:
+                  with tarfile.open(archive, 'r:gz') as z:
+                      for m in z.getmembers():
+                          dest = output.joinpath(*PurePosixPath(m.name).parts)
+                          if m.isdir():
+                              dest.mkdir(parents=True, exist_ok=True)
+                          else:
+                              dest.parent.mkdir(parents=True, exist_ok=True)
+                              with z.extractfile(m) as source, dest.open('wb') as target:
+                                  shutil.copyfileobj(source, target)
+              digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+              Path('source-SHA256SUMS.txt').write_text(digest + '  ' + archive.name + '\n')
+              print('Archive SHA-256:', digest)
+              root = output
+          else:
+              print('No SmartSanaa archive. Looking for checked-in Gradle project.')
+              root = Path('.')
+
+          candidates = [root] + [p.parent for p in root.rglob('settings.gradle.kts')]
+          projects = list(dict.fromkeys(p for p in candidates if all((p / f).is_file() for f in required)))
           if len(projects) != 1:
-              raise SystemExit(f'Expected one Android project; found {len(projects)}')
+              raise SystemExit('Expected one complete native Android Gradle project; found ' + str(len(projects)))
+          project = projects[0]
+          print('Android project:', project)
           with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env:
-              env.write(f'PROJECT_DIR={projects[0].as_posix()}\n')
-          print(f'Verified source {archive}: {count} files, project {projects[0]}')
+              env.write('PROJECT_DIR=' + project.as_posix() + '\n')
           PY
-          if [[ -s SmartSanaaV9-PrintScreen-Updated-Source.zip ]]; then
-            sha256sum SmartSanaaV9-PrintScreen-Updated-Source.zip | tee V9-source-SHA256SUMS.txt
-          else
-            sha256sum SmartSanaaV9.zip | tee V9-source-SHA256SUMS.txt
-          fi
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -100,12 +158,12 @@ jobs:
         run: |
           set -euo pipefail
           sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-          test -d "$sdk" || { echo "Android SDK missing: $sdk" >&2; exit 1; }
+          test -d "$sdk"
           manager="$sdk/cmdline-tools/latest/bin/sdkmanager"
           if [[ ! -x "$manager" ]]; then
             manager="$(find "$sdk/cmdline-tools" -type f -name sdkmanager -print -quit)"
           fi
-          test -x "$manager" || { echo 'sdkmanager missing' >&2; exit 1; }
+          test -x "$manager"
           echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
           yes | "$manager" --licenses >/dev/null || true
@@ -119,45 +177,43 @@ jobs:
         with:
           gradle-version: '8.13'
 
-      - name: Run V9 unit tests
+      - name: Run unit tests
         run: |
           set -o pipefail
           cd "$PROJECT_DIR"
-          gradle --no-daemon :app:testDebugUnitTest --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/v9-tests.log"
+          gradle --no-daemon :app:testDebugUnitTest --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/android-tests.log"
 
-      - name: Run V9 Android lint
+      - name: Run lint
         run: |
           set -o pipefail
           cd "$PROJECT_DIR"
-          gradle --no-daemon :app:lintDebug --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/v9-lint.log"
+          gradle --no-daemon :app:lintDebug --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/android-lint.log"
 
-      - name: Build V9 debug APK
+      - name: Build debug APK
         run: |
           set -o pipefail
           cd "$PROJECT_DIR"
-          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/v9-build.log"
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/android-build.log"
 
-      - name: Verify APK signing, package, and checksum
+      - name: Verify APK signature, package and checksum
         run: |
           set -euo pipefail
+          mkdir -p verified-apk
           apk="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
-          tools="$ANDROID_HOME/build-tools/36.0.0"
           test -s "$apk"
-          "$tools/apksigner" verify --verbose --print-certs "$apk" | tee V9-apk-signature.txt
-          "$tools/aapt" dump badging "$apk" | tee V9-apk-badging.txt
-          grep -F "package: name='com.smartsanaa.manager'" V9-apk-badging.txt
-          sha256sum "$apk" | tee V9-APK-SHA256SUMS.txt
+          tools="$ANDROID_HOME/build-tools/36.0.0"
+          "$tools/apksigner" verify --verbose --print-certs "$apk" | tee verified-apk/signature.txt
+          "$tools/aapt" dump badging "$apk" | tee verified-apk/badging.txt
+          grep -F "package: name='com.smartsanaa.manager'" verified-apk/badging.txt
+          cp "$apk" verified-apk/Smart-Sanaa-debug.apk
+          (cd verified-apk && sha256sum Smart-Sanaa-debug.apk > SHA256SUMS.txt)
+          cp source-SHA256SUMS.txt verified-apk/source-SHA256SUMS.txt 2>/dev/null || true
 
-      - name: Upload V9 debug APK
+      - name: Upload verified debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: Smart-Sanaa-V9-debug-APK
-          path: |
-            v9-source/**/app/build/outputs/apk/debug/app-debug.apk
-            V9-APK-SHA256SUMS.txt
-            V9-apk-signature.txt
-            V9-apk-badging.txt
-            V9-source-SHA256SUMS.txt
+          name: Smart-Sanaa-Android-debug-APK
+          path: verified-apk/
           if-no-files-found: error
           retention-days: 30
 
@@ -165,12 +221,12 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Smart-Sanaa-V9-build-diagnostics
+          name: Smart-Sanaa-Android-build-diagnostics
           path: |
-            v9-tests.log
-            v9-lint.log
-            v9-build.log
-            v9-source/**/app/build/reports/tests/
-            v9-source/**/app/build/reports/lint-results-debug.html
+            android-tests.log
+            android-lint.log
+            android-build.log
+            extracted-android-source/**/app/build/reports/tests/
+            extracted-android-source/**/app/build/reports/lint-results-debug.html
           if-no-files-found: ignore
           retention-days: 14
